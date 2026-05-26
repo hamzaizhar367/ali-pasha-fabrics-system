@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 type Section =
   | "Dashboard"
@@ -214,6 +215,29 @@ const sections: Section[] = [
   "Reports",
 ];
 
+const sectionSlugs: Record<Section, string> = {
+  Dashboard: "dashboard",
+  "Kora Purchase": "purchase",
+  "Raw Stock / Lots": "lots",
+  "Dyeing & Printing": "dyeing",
+  Cutting: "cutting",
+  Embroidery: "embroidery",
+  "Finished Stock": "stock",
+  Sales: "sales",
+  "Customer Khata": "customer-khata",
+  "Supplier / Vendor Khata": "vendor-payable",
+  Reports: "reports",
+};
+
+const sectionBySlug: Record<string, Section> = {
+  customers: "Customer Khata",
+  vendors: "Supplier / Vendor Khata",
+  inventory: "Finished Stock",
+  ...Object.fromEntries(
+  Object.entries(sectionSlugs).map(([section, slug]) => [slug, section as Section]),
+  ),
+};
+
 const navGroups: Array<{ label: string; items: Section[] }> = [
   { label: "Overview", items: ["Dashboard", "Reports"] },
   { label: "Production", items: ["Kora Purchase", "Raw Stock / Lots", "Dyeing & Printing", "Cutting", "Embroidery"] },
@@ -223,59 +247,59 @@ const navGroups: Array<{ label: string; items: Section[] }> = [
 
 const navMeta: Record<Section, { icon: string; shortLabel: string; subtitle: string }> = {
   Dashboard: {
-    icon: "◆",
+    icon: "D",
     shortLabel: "Dashboard",
-    subtitle: "Owner view for maal position, stock, credit, payable, and sales health.",
+    subtitle: "Owner control room for sales, stock, credit, and payables.",
   },
   "Kora Purchase": {
-    icon: "▣",
+    icon: "P",
     shortLabel: "Purchase",
-    subtitle: "Record kora kapra purchases in meters and supplier khata balances.",
+    subtitle: "Record kora kapra purchases in meters and supplier balances.",
   },
   "Raw Stock / Lots": {
-    icon: "▤",
+    icon: "L",
     shortLabel: "Lots",
-    subtitle: "Track every raw lot before cutting: in shop, with vendor, processed, or cut.",
+    subtitle: "Track raw lots before cutting.",
   },
   "Dyeing & Printing": {
-    icon: "◈",
+    icon: "D",
     shortLabel: "Dyeing",
-    subtitle: "Send meters to dyeing or printing vendors and receive processed cloth with loss.",
+    subtitle: "Track processing vendors and received meters.",
   },
   Cutting: {
-    icon: "⌁",
+    icon: "C",
     shortLabel: "Cutting",
-    subtitle: "Convert processed meters into suits using front and back cutting meters.",
+    subtitle: "Convert processed meters into suits.",
   },
   Embroidery: {
-    icon: "✦",
+    icon: "E",
     shortLabel: "Embroidery",
-    subtitle: "Send suits to embroidery and receive A category plus B category stock.",
+    subtitle: "Track suits sent, A category received, and B category stock.",
   },
   "Finished Stock": {
-    icon: "▥",
+    icon: "S",
     shortLabel: "Stock",
-    subtitle: "Manage A and B category finished suits, prices, cost, and profit.",
+    subtitle: "Manage finished A and B category suits.",
   },
   Sales: {
-    icon: "◉",
+    icon: "S",
     shortLabel: "Sales",
-    subtitle: "Sell A or B category suits with cash, credit, or partial payment.",
+    subtitle: "Create sales and update customer balances.",
   },
   "Customer Khata": {
-    icon: "◇",
+    icon: "C",
     shortLabel: "Customer Khata",
-    subtitle: "Review customer balances and record payments received.",
+    subtitle: "Customer balances and payments received.",
   },
   "Supplier / Vendor Khata": {
-    icon: "◍",
-    shortLabel: "Vendor Khata",
-    subtitle: "Review supplier and vendor payable balances and payments.",
+    icon: "V",
+    shortLabel: "Vendor Payable",
+    subtitle: "Supplier and vendor outstanding balances.",
   },
   Reports: {
-    icon: "▦",
+    icon: "R",
     shortLabel: "Reports",
-    subtitle: "Business totals for purchases, processing, stock value, sales, and profit.",
+    subtitle: "Detailed sales, stock, purchase, and payable reports.",
   },
 };
 
@@ -491,7 +515,18 @@ function classNames(...values: Array<string | false | undefined>) {
 }
 
 export default function Home() {
-  const [activeSection, setActiveSection] = useState<Section>("Dashboard");
+  return (
+    <Suspense fallback={<AppShellFallback />}>
+      <AliPashaApp />
+    </Suspense>
+  );
+}
+
+function AliPashaApp() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const activeSection = sectionBySlug[searchParams.get("section") ?? ""] ?? "Dashboard";
   const [suppliers, setSuppliers] = useState<Supplier[]>(seedSuppliers);
   const [vendors, setVendors] = useState<Vendor[]>(seedVendors);
   const [customers, setCustomers] = useState<Customer[]>(seedCustomers);
@@ -565,6 +600,12 @@ export default function Home() {
     amount: "",
     note: "",
   });
+
+  function navigateToSection(section: Section) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("section", sectionSlugs[section]);
+    router.push(`${pathname}?${params.toString()}`, { scroll: false });
+  }
 
   const totals = useMemo(() => {
     const rawInShop = rawLots.reduce((sum, lot) => sum + lot.rawAvailableMeters, 0);
@@ -1277,16 +1318,23 @@ export default function Home() {
                     <button
                       key={section}
                       type="button"
-                      onClick={() => setActiveSection(section)}
+                      onClick={() => navigateToSection(section)}
                       className={classNames(
-                        "relative flex h-10 w-full items-center gap-2.5 rounded-[10px] px-3 text-left text-sm font-medium transition",
+                        "relative flex h-10 w-full items-center gap-2.5 rounded-[10px] border border-transparent px-3 text-left text-sm font-medium transition",
                         activeSection === section
-                          ? "bg-[#eefdf8] text-[#0f766e]"
-                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-950",
+                          ? "border-teal-100 bg-[#eefdf8] text-[#0f766e] shadow-sm shadow-teal-900/5"
+                          : "text-slate-600 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-950",
                       )}
                     >
                       {activeSection === section ? <span className="absolute left-0 top-2.5 h-5 w-0.5 rounded-full bg-[#0f766e]" /> : null}
-                      <span className="w-5 text-center text-xs text-slate-400">{navMeta[section].icon}</span>
+                      <span
+                        className={classNames(
+                          "grid h-5 w-5 shrink-0 place-items-center rounded-md border transition",
+                          activeSection === section ? "border-teal-200 bg-white" : "border-slate-200 bg-slate-50",
+                        )}
+                      >
+                        <span className={classNames("h-1.5 w-1.5 rounded-full", activeSection === section ? "bg-[#0f766e]" : "bg-slate-300")} />
+                      </span>
                       <span className="min-w-0 truncate">{navMeta[section].shortLabel}</span>
                     </button>
                   ))}
@@ -1295,13 +1343,6 @@ export default function Home() {
             ))}
           </div>
         </nav>
-
-        <div className="shrink-0 border-t border-slate-200 p-3">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
-            <p className="text-xs font-medium text-slate-700">Demo mode</p>
-            <p className="text-[11px] text-slate-500">Local state only</p>
-          </div>
-        </div>
       </aside>
 
       <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -1319,7 +1360,7 @@ export default function Home() {
               </div>
               <select
                 value={activeSection}
-                onChange={(event) => setActiveSection(event.target.value as Section)}
+                onChange={(event) => navigateToSection(event.target.value as Section)}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm lg:hidden"
               >
                 {sections.map((section) => (
@@ -1329,68 +1370,83 @@ export default function Home() {
             </div>
         </header>
 
-        <div className="space-y-4 px-6 py-5 lg:px-7">{renderSection()}</div>
+        <div className="space-y-4 px-6 pb-5 pt-6 lg:px-7">{renderSection()}</div>
       </main>
     </div>
   );
 
   function renderSection() {
     switch (activeSection) {
-      case "Dashboard":
+      case "Dashboard": {
+        const recentSales = [...sales].slice(-5).reverse();
+        const lowStockArticles = finishedArticles.filter((article) => article.aCategorySuits + article.bCategorySuits <= 5);
+        const activeOrders =
+          processingJobs.filter((job) => job.status === "Sent").length +
+          embroideryJobs.filter((job) => job.status === "Sent").length;
         return (
           <>
-            <DashboardHero
-              readyStock={formatSuits(totals.readyStock)}
-              customerCredit={formatPKR(totals.customerCredit)}
-              vendorPayable={formatPKR(totals.vendorPayable)}
-            />
-            <WorkflowJourney />
-            <Panel title="Business Snapshot" subtitle="Live owner-level totals from purchases, processing, stock, sales, and khata.">
+            <DashboardWorkflow />
+            <Panel title="Key Summary">
               <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
-                <MetricCard label="A stock" value={formatSuits(totals.readyAStock)} helper="Prime suits" tone="emerald" />
-                <MetricCard label="B stock" value={formatSuits(totals.readyBStock)} helper="Sellable B category" tone="amber" />
-                <MetricCard label="Customer credit" value={formatPKR(totals.customerCredit)} helper="Receivable khata" tone="rose" />
-                <MetricCard label="Vendor payable" value={formatPKR(totals.supplierVendorPayable)} helper="Supplier/vendor dues" tone="amber" />
-                <MetricCard label="Sales" value={formatPKR(totals.totalSales)} helper="Gross sales" tone="slate" />
-                <MetricCard label="Profit" value={formatPKR(totals.estimatedProfit)} helper="Estimated margin" tone="emerald" />
-              </div>
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">Full Snapshot</p>
-                <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-4">
-                  <MetricCard label="Raw cloth" value={formatMeters(totals.rawInShop)} helper="In shop meters" tone="emerald" compact />
-                  <MetricCard label="With dyeing" value={formatMeters(totals.withProcessing)} helper="Vendor maal" tone="amber" compact />
-                  <MetricCard label="Ready cutting" value={formatMeters(totals.processedReady)} helper="Processed meters" tone="sky" compact />
-                  <MetricCard label="With embroidery" value={formatSuits(totals.withEmbroidery)} helper="Vendor suits" tone="violet" compact />
-                </div>
+                <MetricCard label="Total sales" value={formatPKR(totals.totalSales)} helper="Gross sales" tone="slate" compact />
+                <MetricCard label="Customer credit" value={formatPKR(totals.customerCredit)} helper="Pending payments" tone="rose" compact />
+                <MetricCard label="Vendor payable" value={formatPKR(totals.supplierVendorPayable)} helper="Supplier/vendor dues" tone="amber" compact />
+                <MetricCard label="Ready stock" value={formatSuits(totals.readyStock)} helper="A + B suits" tone="emerald" compact />
+                <MetricCard label="Active orders" value={String(activeOrders)} helper="Vendor jobs open" tone="sky" compact />
               </div>
             </Panel>
-            <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+            <div className="grid gap-4 xl:grid-cols-[1fr_0.8fr]">
               <Panel
-                title="Owner Questions"
-                subtitle="The four questions a kapra business owner checks first."
+                title="Recent Sales"
               >
-                <div className="grid gap-2.5 sm:grid-cols-2">
-                  <FocusItem label="Where is my maal?" value={`${formatMeters(totals.withProcessing)} with processing, ${formatSuits(totals.withEmbroidery)} at embroidery`} />
-                  <FocusItem label="Who owes me money?" value={formatPKR(totals.customerCredit)} badge="Customer credit" tone="rose" />
-                  <FocusItem label="Who do I owe money to?" value={formatPKR(totals.supplierVendorPayable)} badge="Payables" tone="amber" />
-                  <FocusItem label="What stock is ready?" value={`${formatSuits(totals.readyAStock)} A, ${formatSuits(totals.readyBStock)} B`} badge="Ready stock" tone="emerald" />
-                </div>
+                <DataTable
+                  headers={["Date", "Customer", "Article", "Category", "Qty", "Total", "Balance"]}
+                  rows={recentSales.map((sale) => [
+                    sale.date,
+                    customerName(sale.customerId),
+                    articleNumber(sale.articleId),
+                    <Badge key={`${sale.id}-category`} label={sale.category} tone={sale.category === "A Category" ? "emerald" : "amber"} />,
+                    formatSuits(sale.quantity),
+                    formatPKR(sale.total),
+                    <span key={`${sale.id}-balance`} className={classNames("font-medium", sale.balance > 0 ? "text-[#dc2626]" : "text-[#16a34a]")}>
+                      {formatPKR(sale.balance)}
+                    </span>,
+                  ])}
+                  empty="No recent sales yet."
+                />
               </Panel>
-              <Panel
-                title="Today's Pulse"
-                subtitle="Meters stay before cutting. Suits and categories start after cutting."
-              >
-                <div className="divide-y divide-slate-100">
-                  <DashboardLine label="Ready A stock" value={formatSuits(totals.readyAStock)} tone="success" />
-                  <DashboardLine label="Ready B stock" value={formatSuits(totals.readyBStock)} tone="warning" />
-                  <DashboardLine label="Customer credit" value={formatPKR(totals.customerCredit)} tone="danger" />
-                  <DashboardLine label="Vendor payable" value={formatPKR(totals.vendorPayable)} tone="warning" />
-                  <DashboardLine label="Estimated profit" value={formatPKR(totals.estimatedProfit)} tone="success" />
-                </div>
-              </Panel>
+              <div className="grid gap-4">
+                <Panel title="Stock Alerts">
+                  <div className="divide-y divide-slate-100">
+                    {lowStockArticles.length === 0 ? (
+                      <div className="rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-700">
+                        No low stock alerts.
+                      </div>
+                    ) : (
+                      lowStockArticles.map((article) => (
+                        <DashboardLine
+                          key={article.id}
+                          label={article.articleNumber}
+                          value={`${formatSuits(article.aCategorySuits + article.bCategorySuits)} ready`}
+                          tone="warning"
+                        />
+                      ))
+                    )}
+                  </div>
+                </Panel>
+                <Panel title="Quick Actions">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <QuickAction label="Add Sale" onClick={() => navigateToSection("Sales")} />
+                    <QuickAction label="Add Purchase" onClick={() => navigateToSection("Kora Purchase")} />
+                    <QuickAction label="Add Customer" onClick={() => navigateToSection("Customer Khata")} />
+                    <QuickAction label="Add Lot" onClick={() => navigateToSection("Kora Purchase")} />
+                  </div>
+                </Panel>
+              </div>
             </div>
           </>
         );
+      }
       case "Kora Purchase":
         return (
           <TwoColumn
@@ -1426,32 +1482,40 @@ export default function Home() {
       case "Dyeing & Printing":
         return (
           <>
-            <TwoColumn
-              left={
+            <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <div className="min-w-0">
                 <Panel title="Send to Dyeing">
-                  <form onSubmit={handleProcessingSend} className="grid gap-3">
-                    <SelectInput label="Select lot" value={processingSendForm.lotId} onChange={(value) => setProcessingSendForm({ ...processingSendForm, lotId: value })} options={rawLots.filter((lot) => lot.rawAvailableMeters > 0).map((lot) => ({ value: lot.id, label: `${lot.lotNumber} - ${formatMeters(lot.rawAvailableMeters)} raw` }))} />
-                    <TextInput label="Vendor name" value={processingSendForm.vendorName} onChange={(value) => setProcessingSendForm({ ...processingSendForm, vendorName: value })} placeholder="Faisal Dyeing" />
-                    <NumberInput label="Quantity sent (meters)" value={processingSendForm.quantitySent} onChange={(value) => setProcessingSendForm({ ...processingSendForm, quantitySent: value })} />
-                    <SelectInput label="Processing type" value={processingSendForm.type} onChange={(value) => setProcessingSendForm({ ...processingSendForm, type: value as ProcessingJob["type"] })} options={["Dyeing", "Printing", "Dyeing + Printing"].map((value) => ({ value, label: value }))} />
-                    <NumberInput label="Rate per meter (PKR)" value={processingSendForm.ratePerMeter} onChange={(value) => setProcessingSendForm({ ...processingSendForm, ratePerMeter: value })} />
+                  <form onSubmit={handleProcessingSend} className="grid gap-2 pb-2">
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <SelectInput label="Select lot" value={processingSendForm.lotId} onChange={(value) => setProcessingSendForm({ ...processingSendForm, lotId: value })} options={rawLots.filter((lot) => lot.rawAvailableMeters > 0).map((lot) => ({ value: lot.id, label: `${lot.lotNumber} - ${formatMeters(lot.rawAvailableMeters)} raw` }))} />
+                      <TextInput label="Vendor name" value={processingSendForm.vendorName} onChange={(value) => setProcessingSendForm({ ...processingSendForm, vendorName: value })} placeholder="Faisal Dyeing" />
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-3">
+                      <SelectInput label="Processing type" value={processingSendForm.type} onChange={(value) => setProcessingSendForm({ ...processingSendForm, type: value as ProcessingJob["type"] })} options={["Dyeing", "Printing", "Dyeing + Printing"].map((value) => ({ value, label: value }))} />
+                      <NumberInput label="Quantity sent (meters)" value={processingSendForm.quantitySent} onChange={(value) => setProcessingSendForm({ ...processingSendForm, quantitySent: value })} />
+                      <NumberInput label="Rate per meter (PKR)" value={processingSendForm.ratePerMeter} onChange={(value) => setProcessingSendForm({ ...processingSendForm, ratePerMeter: value })} />
+                    </div>
                     <TextInput label="Expected return date" type="date" value={processingSendForm.expectedReturnDate} onChange={(value) => setProcessingSendForm({ ...processingSendForm, expectedReturnDate: value })} />
-                    <TextArea label="Notes" value={processingSendForm.notes} onChange={(value) => setProcessingSendForm({ ...processingSendForm, notes: value })} />
-                    <PrimaryButton>Send to Dyeing</PrimaryButton>
+                    <CompactTextArea label="Notes" value={processingSendForm.notes} onChange={(value) => setProcessingSendForm({ ...processingSendForm, notes: value })} />
+                    <div className="pt-0.5">
+                      <PrimaryButton>Send to Dyeing</PrimaryButton>
+                    </div>
                   </form>
                 </Panel>
-              }
-              right={
+              </div>
+              <div className="min-w-0">
                 <Panel title="Receive Stock">
-                  <form onSubmit={handleProcessingReceive} className="grid gap-3">
-                    <SelectInput label="Select sent processing job" value={processingReceiveForm.jobId} onChange={(value) => setProcessingReceiveForm({ ...processingReceiveForm, jobId: value })} options={processingJobs.filter((job) => job.status === "Sent").map((job) => ({ value: job.id, label: `${job.jobNumber} - ${lotNumber(job.lotId)} - ${formatMeters(job.sentMeters)}` }))} />
+                  <form onSubmit={handleProcessingReceive} className="grid gap-2 pb-2">
+                    <SelectInput label="Pending processing job" value={processingReceiveForm.jobId} onChange={(value) => setProcessingReceiveForm({ ...processingReceiveForm, jobId: value })} options={processingJobs.filter((job) => job.status === "Sent").map((job) => ({ value: job.id, label: `${job.jobNumber} - ${lotNumber(job.lotId)} - ${formatMeters(job.sentMeters)}` }))} />
                     <NumberInput label="Received meters" value={processingReceiveForm.receivedMeters} onChange={(value) => setProcessingReceiveForm({ ...processingReceiveForm, receivedMeters: value })} />
                     <CalcLine label="Loss" value={processingReceiveForm.jobId ? formatMeters((processingJobs.find((job) => job.id === processingReceiveForm.jobId)?.sentMeters ?? 0) - toNumber(processingReceiveForm.receivedMeters)) : formatMeters(0)} />
-                    <PrimaryButton>Receive Stock</PrimaryButton>
+                    <div className="pt-0.5">
+                      <PrimaryButton>Receive Stock</PrimaryButton>
+                    </div>
                   </form>
                 </Panel>
-              }
-            />
+              </div>
+            </div>
             <Panel title="Dyeing & Printing Jobs">
               <DataTable
                 headers={["Job", "Lot", "Vendor", "Type", "Sent", "Received", "Loss", "Status", "Payable"]}
@@ -1467,20 +1531,28 @@ export default function Home() {
                   formatPKR(job.status === "Received" ? job.sentMeters * job.ratePerMeter : 0),
                 ])}
                 empty="No processing jobs yet."
+                compact
+                tableClassName="min-w-[760px]"
               />
             </Panel>
           </>
         );
       case "Cutting":
         return (
-          <TwoColumn
-            left={
+          <div className="grid items-start gap-5 xl:grid-cols-[390px_minmax(0,1fr)]">
+            <div className="min-w-0">
               <Panel title="Cut Into Suits">
                 <form onSubmit={handleCutting} className="grid gap-3">
                   <SelectInput label="Select lot with processed meters" value={cuttingForm.lotId} onChange={(value) => setCuttingForm({ ...cuttingForm, lotId: value })} options={rawLots.filter((lot) => lot.processedMeters > 0).map((lot) => ({ value: lot.id, label: `${lot.lotNumber} - ${formatMeters(lot.processedMeters)} processed` }))} />
-                  <div className="grid grid-cols-2 gap-2">
-                    <NumberInput label="Front (m)" value={cuttingForm.frontCuttingMeters} onChange={(value) => setCuttingForm({ ...cuttingForm, frontCuttingMeters: value })} />
-                    <NumberInput label="Back (m)" value={cuttingForm.backCuttingMeters} onChange={(value) => setCuttingForm({ ...cuttingForm, backCuttingMeters: value })} />
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Cutting meters</p>
+                      <span className="text-[11px] font-medium text-slate-400">Front + Back</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <NumberInput label="Front (m)" value={cuttingForm.frontCuttingMeters} onChange={(value) => setCuttingForm({ ...cuttingForm, frontCuttingMeters: value })} />
+                      <NumberInput label="Back (m)" value={cuttingForm.backCuttingMeters} onChange={(value) => setCuttingForm({ ...cuttingForm, backCuttingMeters: value })} />
+                    </div>
                   </div>
                   <CalcLine label="Total meter per suit" value={formatMeters(toNumber(cuttingForm.frontCuttingMeters) + toNumber(cuttingForm.backCuttingMeters))} />
                   <TextInput label="Article number" value={cuttingForm.articleNumber} onChange={(value) => setCuttingForm({ ...cuttingForm, articleNumber: value })} placeholder="A-502" />
@@ -1493,27 +1565,26 @@ export default function Home() {
                   <PrimaryButton>Cut Into Suits</PrimaryButton>
                 </form>
               </Panel>
-            }
-            right={
+            </div>
+            <div className="min-w-0">
               <Panel title="Cutting Jobs">
-                <DataTable
-                  headers={["Lot", "Article", "Used", "Front", "Back", "Total/Suit", "Suits", "Leftover", "Cutting cost"]}
-                  rows={cuttingJobs.map((job) => [
-                    lotNumber(job.lotId),
-                    job.articleNumber,
-                    formatMeters(job.processedMetersUsed),
-                    formatMeters(job.frontCuttingMeters),
-                    formatMeters(job.backCuttingMeters),
-                    formatMeters(job.totalMetersPerSuit),
-                    formatSuits(job.suitsCreated),
-                    formatMeters(job.leftoverMeters),
-                    formatPKR(job.cuttingCost),
-                  ])}
-                  empty="No cutting jobs yet."
+                <CuttingJobsTable
+                  rows={cuttingJobs.map((job) => ({
+                    id: job.id,
+                    lot: lotNumber(job.lotId),
+                    article: job.articleNumber,
+                    used: formatMeters(job.processedMetersUsed),
+                    front: formatMeters(job.frontCuttingMeters),
+                    back: formatMeters(job.backCuttingMeters),
+                    total: formatMeters(job.totalMetersPerSuit),
+                    suits: formatSuits(job.suitsCreated),
+                    leftover: formatMeters(job.leftoverMeters),
+                    cost: formatPKR(job.cuttingCost),
+                  }))}
                 />
               </Panel>
-            }
-          />
+            </div>
+          </div>
         );
       case "Embroidery":
         {
@@ -1531,45 +1602,55 @@ export default function Home() {
           const calculatedPayable = selectedReceiveJob ? selectedReceiveJob.sentSuits * selectedReceiveJob.ratePerSuit : 0;
 
           return (
-            <div className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+            <div className="grid items-start gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
               <div className="space-y-5">
-                <Panel title="Send to Embroidery" subtitle="Move cut suits from shop stock to embroidery vendor work.">
+                <Panel title="Send to Embroidery">
                   <form onSubmit={handleEmbroiderySend} className="grid gap-3">
                     <SelectInput label="Select article" value={embroiderySendForm.articleId} onChange={(value) => setEmbroiderySendForm({ ...embroiderySendForm, articleId: value })} options={finishedArticles.filter((article) => article.aCategorySuits > 0).map((article) => ({ value: article.id, label: `${article.articleNumber} - ${formatSuits(article.aCategorySuits)} A category` }))} />
                     <CalcLine label="Available A stock" value={formatSuits(selectedArticle?.aCategorySuits ?? 0)} />
-                    <TextInput label="Vendor name" value={embroiderySendForm.vendorName} onChange={(value) => setEmbroiderySendForm({ ...embroiderySendForm, vendorName: value })} placeholder="Star Embroidery" />
-                    <div className="grid grid-cols-2 gap-2">
-                      <NumberInput label="Suits sent" value={embroiderySendForm.suitsSent} onChange={(value) => setEmbroiderySendForm({ ...embroiderySendForm, suitsSent: value })} />
-                      <NumberInput label="Rate / suit (PKR)" value={embroiderySendForm.ratePerSuit} onChange={(value) => setEmbroiderySendForm({ ...embroiderySendForm, ratePerSuit: value })} />
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Vendor work</p>
+                      <TextInput label="Vendor name" value={embroiderySendForm.vendorName} onChange={(value) => setEmbroiderySendForm({ ...embroiderySendForm, vendorName: value })} placeholder="Star Embroidery" />
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Quantity and rate</p>
+                      <div className="grid gap-2.5 sm:grid-cols-2">
+                        <NumberInput label="Suits sent" value={embroiderySendForm.suitsSent} onChange={(value) => setEmbroiderySendForm({ ...embroiderySendForm, suitsSent: value })} />
+                        <NumberInput label="Rate / suit (PKR)" value={embroiderySendForm.ratePerSuit} onChange={(value) => setEmbroiderySendForm({ ...embroiderySendForm, ratePerSuit: value })} />
+                      </div>
                     </div>
                     <TextInput label="Expected return date" type="date" value={embroiderySendForm.expectedReturnDate} onChange={(value) => setEmbroiderySendForm({ ...embroiderySendForm, expectedReturnDate: value })} />
                     <TextArea label="Notes" value={embroiderySendForm.notes} onChange={(value) => setEmbroiderySendForm({ ...embroiderySendForm, notes: value })} />
-                    <PrimaryButton>Send to Embroidery</PrimaryButton>
+                    <div className="pt-0.5">
+                      <PrimaryButton>Send to Embroidery</PrimaryButton>
+                    </div>
                   </form>
                 </Panel>
 
-                <Panel title="Receive Embroidery" subtitle="Receive A Category suits and convert damaged pieces into B Category stock.">
+                <Panel title="Receive Embroidery">
                   <form onSubmit={handleEmbroideryReceive} className="grid gap-3">
                     <SelectInput label="Pending embroidery job" value={embroideryReceiveForm.jobId} onChange={(value) => setEmbroideryReceiveForm({ ...embroideryReceiveForm, jobId: value })} options={pendingEmbroideryJobs.map((job) => ({ value: job.id, label: `${job.jobNumber} - ${articleNumber(job.articleId)} - ${formatSuits(job.sentSuits)}` }))} />
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid gap-2 sm:grid-cols-2">
                       <CalcLine label="Sent suits" value={formatSuits(selectedReceiveJob?.sentSuits ?? 0)} />
                       <CalcLine label="Vendor" value={selectedReceiveJob ? vendorName(selectedReceiveJob.vendorId) : "-"} />
                     </div>
                     <NumberInput label="Received A Category" value={embroideryReceiveForm.receivedSuits} onChange={(value) => setEmbroideryReceiveForm({ ...embroideryReceiveForm, receivedSuits: value })} />
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid gap-2 sm:grid-cols-2">
                       <CalcLine label="B Category sellable" value={formatSuits(calculatedBCategory)} />
                       <CalcLine label="Payable" value={formatPKR(calculatedPayable)} />
                     </div>
                     <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                       B Category means damaged but sellable stock.
                     </p>
-                    <PrimaryButton>Receive Embroidery</PrimaryButton>
+                    <div className="pt-0.5">
+                      <PrimaryButton>Receive Embroidery</PrimaryButton>
+                    </div>
                   </form>
                 </Panel>
               </div>
 
               <div className="space-y-5">
-                <Panel title="Embroidery Summary" subtitle="Current embroidery movement and payable position.">
+                <Panel title="Embroidery Summary">
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     <SummaryStat label="Suits with embroidery" value={formatSuits(totals.withEmbroidery)} tone="info" />
                     <SummaryStat label="A Category received" value={formatSuits(embroideryAReceived)} tone="success" />
@@ -1578,7 +1659,7 @@ export default function Home() {
                   </div>
                 </Panel>
 
-                <Panel title="Pending Embroidery Jobs" subtitle="Suits currently with embroidery vendors.">
+                <Panel title="Pending Embroidery Jobs">
                   <DataTable
                     headers={["Job", "Article", "Vendor", "Sent", "Rate", "Expected"]}
                     rows={pendingEmbroideryJobs.map((job) => [
@@ -1590,10 +1671,12 @@ export default function Home() {
                       job.expectedReturnDate,
                     ])}
                     empty="No pending embroidery jobs."
+                    compact
+                    tableClassName="min-w-[620px]"
                   />
                 </Panel>
 
-                <Panel title="Embroidery History" subtitle="A Category and B Category received from vendor work.">
+                <Panel title="Embroidery History">
                   <DataTable
                     headers={["Job", "Article", "Vendor", "Sent", "A Category", "B Category", "Payable", "Status"]}
                     rows={embroideryJobs.map((job) => [
@@ -1607,6 +1690,8 @@ export default function Home() {
                       <Badge key={job.id} label={job.status} tone={job.status === "Received" ? "emerald" : "amber"} />,
                     ])}
                     empty="No embroidery history yet."
+                    compact
+                    tableClassName="min-w-[760px]"
                   />
                 </Panel>
               </div>
@@ -1634,14 +1719,14 @@ export default function Home() {
             <>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                 <MetricCard label="Total Ready Suits" value={formatSuits(totals.readyStock)} helper="A + B stock" tone="sky" />
-                <MetricCard label="A Category Suits" value={formatSuits(totals.readyAStock)} helper="Prime ready maal" tone="emerald" />
-                <MetricCard label="B Category Suits" value={formatSuits(totals.readyBStock)} helper="Damaged sellable" tone="amber" />
-                <MetricCard label="Ready Stock Value" value={formatPKR(totals.readyStockValue)} helper="At cost value" tone="slate" />
-                <MetricCard label="Estimated Profit" value={formatPKR(estimatedOnHandProfit)} helper="If stock sells" tone="emerald" />
+                <MetricCard label="A Category Suits" value={formatSuits(totals.readyAStock)} helper="A stock" tone="emerald" />
+                <MetricCard label="B Category Suits" value={formatSuits(totals.readyBStock)} helper="B stock" tone="amber" />
+                <MetricCard label="Ready Stock Value" value={formatPKR(totals.readyStockValue)} helper="At cost" tone="slate" />
+                <MetricCard label="Estimated Profit" value={formatPKR(estimatedOnHandProfit)} helper="On hand" tone="emerald" />
               </div>
 
               <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-                <Panel title="Finished Stock" subtitle="Ready maal control with editable local sale prices and cost per suit.">
+                <Panel title="Finished Stock">
                   <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                     B Category means damaged but sellable stock.
                   </p>
@@ -1662,7 +1747,7 @@ export default function Home() {
                   />
                 </Panel>
 
-                <Panel title="Stock Health" subtitle="Quick owner view of ready stock condition.">
+                <Panel title="Stock Health">
                   <div className="divide-y divide-slate-100">
                     <DashboardLine label="Ready for sale" value={formatSuits(totals.readyStock)} tone="success" />
                     <DashboardLine label="B Category quantity" value={formatSuits(totals.readyBStock)} tone="warning" />
@@ -1693,7 +1778,7 @@ export default function Home() {
 
           return (
             <div className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
-              <Panel title="Create Sale" subtitle="Daily shop counter sale with cash, credit, or partial payment.">
+              <Panel title="Create Sale">
                 <form onSubmit={handleSale} className="grid gap-3">
                   <TextInput label="Customer name" value={saleForm.customerName} onChange={(value) => setSaleForm({ ...saleForm, customerName: value })} placeholder="Ali Fabrics" />
                   <SelectInput label="Select article" value={saleForm.articleId} onChange={(value) => {
@@ -1738,7 +1823,7 @@ export default function Home() {
               </Panel>
 
               <div className="space-y-5">
-                <Panel title="Sale Summary" subtitle="Current sales and category movement.">
+                <Panel title="Sale Summary">
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <SummaryStat label="Total sales" value={formatPKR(totals.totalSales)} tone="success" />
                     <SummaryStat label="Amount received" value={formatPKR(totals.totalReceived)} tone="success" />
@@ -1748,7 +1833,7 @@ export default function Home() {
                   </div>
                 </Panel>
 
-                <Panel title="Sales History" subtitle="Invoice-style register for cash, credit, and partial sales.">
+                <Panel title="Sales History">
                   <DataTable
                     headers={["Date", "Customer", "Article", "Category", "Qty", "Rate", "Total", "Paid", "Balance", "Type"]}
                     rows={sales.map((sale) => [
@@ -1786,7 +1871,7 @@ export default function Home() {
               </div>
 
               <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-                <Panel title="Customer Ledger" subtitle="Credit customer khata with sales, paid amount, and pending balance.">
+                <Panel title="Customer Ledger">
                   <DataTable
                     headers={["Customer", "Total Sales", "Paid", "Balance", "Last Sale", "Status"]}
                     rows={customerSummaries.map((item) => [
@@ -1801,7 +1886,7 @@ export default function Home() {
                   />
                 </Panel>
 
-                <Panel title="Add Customer Payment" subtitle="Use this when a credit customer pays later.">
+                <Panel title="Add Customer Payment">
                   <form onSubmit={handleCustomerPayment} className="grid gap-3">
                     <SelectInput label="Select customer" value={customerPaymentForm.partyId} onChange={(value) => setCustomerPaymentForm({ ...customerPaymentForm, partyId: value })} options={customers.map((customer) => ({ value: customer.id, label: `${customer.name} - ${formatPKR(balanceFor(ledgerEntries, customer.id))}` }))} />
                     <CalcLine label="Current balance" value={formatPKR(selectedCustomerBalance)} />
@@ -1812,7 +1897,7 @@ export default function Home() {
                 </Panel>
               </div>
 
-              <Panel title="Customer Sale History" subtitle="Sale history feeding customer khata balances.">
+              <Panel title="Customer Sale History">
                 <DataTable
                   headers={["Date", "Customer", "Article", "Category", "Total", "Paid", "Balance"]}
                   rows={sales.map((sale) => [
@@ -1873,6 +1958,24 @@ export default function Home() {
           .sort((a, b) => b.sold - a.sold)[0];
         const topCreditCustomer = [...customerSummaries].sort((a, b) => b.balance - a.balance)[0];
         const biggestPayable = [...payableSummaries].sort((a, b) => b.balance - a.balance)[0];
+        const stockMovementRows = [
+          ["Raw cloth in shop", formatMeters(totals.rawInShop), "Meters"],
+          ["With dyeing/printing", formatMeters(totals.withProcessing), "Meters"],
+          ["Ready for cutting", formatMeters(totals.processedReady), "Meters"],
+          ["With embroidery", formatSuits(totals.withEmbroidery), "Suits"],
+          ["Ready A stock", formatSuits(totals.readyAStock), "Suits"],
+          ["Ready B stock", formatSuits(totals.readyBStock), "Suits"],
+        ];
+        const monthlySummary = sales.reduce<Record<string, { sales: number; received: number; balance: number }>>((summary, sale) => {
+          const month = sale.date.slice(0, 7);
+          const current = summary[month] ?? { sales: 0, received: 0, balance: 0 };
+          summary[month] = {
+            sales: current.sales + sale.total,
+            received: current.received + sale.paid,
+            balance: current.balance + sale.balance,
+          };
+          return summary;
+        }, {});
         return (
           <>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1906,6 +2009,72 @@ export default function Home() {
                 empty="No report data."
               />
             </Panel>
+            <div className="grid gap-4 xl:grid-cols-2">
+              <Panel title="Sales Analysis">
+                <DataTable
+                  headers={["Date", "Customer", "Article", "Category", "Qty", "Total", "Paid", "Balance", "Type"]}
+                  rows={sales.map((sale) => [
+                    sale.date,
+                    customerName(sale.customerId),
+                    articleNumber(sale.articleId),
+                    <Badge key={`${sale.id}-category`} label={sale.category} tone={sale.category === "A Category" ? "emerald" : "amber"} />,
+                    formatSuits(sale.quantity),
+                    formatPKR(sale.total),
+                    formatPKR(sale.paid),
+                    formatPKR(sale.balance),
+                    sale.paymentType,
+                  ])}
+                  empty="No sales report yet."
+                />
+              </Panel>
+              <Panel title="Customer Balance Report">
+                <DataTable
+                  headers={["Customer", "Total Sales", "Paid", "Balance", "Last Sale", "Status"]}
+                  rows={customerSummaries.map((summary) => [
+                    summary.customer.name,
+                    formatPKR(summary.totalSales),
+                    formatPKR(summary.totalPaid),
+                    formatPKR(summary.balance),
+                    summary.lastSaleDate,
+                    <Badge key={summary.customer.id} label={summary.balance > 0 ? "Pending" : "Clear"} tone={summary.balance > 0 ? "rose" : "emerald"} />,
+                  ])}
+                  empty="No customer balances."
+                />
+              </Panel>
+              <Panel title="Vendor Payable Details">
+                <DataTable
+                  headers={["Name", "Type", "Payable", "Paid", "Balance", "Last Activity"]}
+                  rows={payableSummaries.map((item) => [
+                    item.name,
+                    <Badge key={item.id} label={item.type} tone={item.type === "Supplier" ? "sky" : "amber"} />,
+                    formatPKR(item.payable),
+                    formatPKR(item.paid),
+                    formatPKR(item.balance),
+                    item.lastActivity,
+                  ])}
+                  empty="No payable details."
+                />
+              </Panel>
+              <Panel title="Stock Movement">
+                <DataTable
+                  headers={["Stage", "Value", "Unit"]}
+                  rows={stockMovementRows}
+                  empty="No stock movement."
+                />
+              </Panel>
+            </div>
+            <Panel title="Monthly Summary">
+              <DataTable
+                headers={["Month", "Sales", "Received", "Balance"]}
+                rows={Object.entries(monthlySummary).map(([month, summary]) => [
+                  month,
+                  formatPKR(summary.sales),
+                  formatPKR(summary.received),
+                  formatPKR(summary.balance),
+                ])}
+                empty="No monthly summary yet."
+              />
+            </Panel>
             <Panel title="Cutting Report">
               <DataTable
                 headers={["Lot", "Article", "Front cutting", "Back cutting", "Total/suit", "Suits created", "Leftover"]}
@@ -1929,7 +2098,7 @@ export default function Home() {
     }
   }
 
-  function rawLotsTable() {
+function rawLotsTable() {
     return (
       <DataTable
         headers={["Lot", "Supplier", "Cloth", "Purchased", "Raw available", "Processed", "With vendor", "Status", "Notes"]}
@@ -1956,111 +2125,118 @@ export default function Home() {
   }
 }
 
-function DashboardHero({
-  readyStock,
-  customerCredit,
-  vendorPayable,
+function CuttingJobsTable({
+  rows,
 }: {
-  readyStock: string;
-  customerCredit: string;
-  vendorPayable: string;
+  rows: Array<{
+    id: string;
+    lot: string;
+    article: string;
+    used: string;
+    front: string;
+    back: string;
+    total: string;
+    suits: string;
+    leftover: string;
+    cost: string;
+  }>;
 }) {
-  return (
-    <section className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white shadow-sm shadow-slate-200/60">
-      <div className="h-1 bg-[#0f766e]" />
-      <div className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <span className="inline-flex rounded-full border border-teal-100 bg-[#eefdf8] px-2.5 py-1 text-[11px] font-medium text-[#0f766e]">
-            Live textile workflow
-          </span>
-          <h3 className="mt-1 text-lg font-semibold tracking-tight text-[#111827]">
-            Track every lot from kora kapra to khata.
-          </h3>
-          <p className="mt-1 max-w-2xl text-sm leading-5 text-[#64748b]">
-            Monitor meters, processing vendors, cutting, embroidery, A/B stock, sales, credit, and payables.
-          </p>
-          <p className="mt-1.5 text-xs font-medium text-slate-500">Live view of stock, vendor work, customer credit, and pending payments.</p>
-        </div>
-        <div className="grid min-w-[360px] gap-2 sm:grid-cols-3">
-          <MiniStat label="Ready stock" value={readyStock} tone="success" />
-          <MiniStat label="Customer credit" value={customerCredit} tone="danger" />
-          <MiniStat label="Vendor payable" value={vendorPayable} tone="warning" />
-        </div>
-      </div>
-    </section>
-  );
-}
+  const headers = ["Lot", "Article", "Used", "Front", "Back", "Total", "Suits", "Leftover", "Cost"];
 
-function MiniStat({ label, value, tone }: { label: string; value: string; tone: "success" | "warning" | "danger" }) {
-  const tones = {
-    success: "text-[#16a34a]",
-    warning: "text-[#d97706]",
-    danger: "text-[#dc2626]",
-  };
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
-      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">{label}</p>
-      <p className={classNames("mt-0.5 truncate text-sm font-semibold", tones[tone])}>{value}</p>
+    <div className="thin-scrollbar overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <table className="w-full min-w-[600px] table-fixed text-left text-[13px]">
+        <colgroup>
+          <col className="w-[11%]" />
+          <col className="w-[12%]" />
+          <col className="w-[11%]" />
+          <col className="w-[10%]" />
+          <col className="w-[10%]" />
+          <col className="w-[10%]" />
+          <col className="w-[12%]" />
+          <col className="w-[12%]" />
+          <col className="w-[12%]" />
+        </colgroup>
+        <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.08em] text-slate-500">
+          <tr>
+            {headers.map((header) => (
+              <th
+                key={header}
+                className={classNames(
+                  "whitespace-nowrap px-2.5 py-2 font-semibold",
+                  header !== "Lot" && header !== "Article" && "text-right",
+                )}
+              >
+                {header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={headers.length} className="px-4 py-7 text-center text-xs font-medium text-slate-500">
+                No cutting jobs yet.
+              </td>
+            </tr>
+          ) : (
+            rows.map((row) => (
+              <tr key={row.id} className="transition hover:bg-slate-50/70">
+                <td className="truncate px-2.5 py-2 font-medium text-slate-800">{row.lot}</td>
+                <td className="truncate px-2.5 py-2 text-slate-700">{row.article}</td>
+                <td className="px-2.5 py-2 text-right tabular-nums text-slate-700">{row.used}</td>
+                <td className="px-2.5 py-2 text-right tabular-nums text-slate-700">{row.front}</td>
+                <td className="px-2.5 py-2 text-right tabular-nums text-slate-700">{row.back}</td>
+                <td className="px-2.5 py-2 text-right tabular-nums text-slate-700">{row.total}</td>
+                <td className="px-2.5 py-2 text-right tabular-nums font-medium text-slate-800">{row.suits}</td>
+                <td className="px-2.5 py-2 text-right tabular-nums text-slate-700">{row.leftover}</td>
+                <td className="px-2.5 py-2 text-right tabular-nums text-slate-700">{row.cost}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-function WorkflowJourney() {
-  const steps = [
-    "Kora Purchase",
-    "Dyeing/Printing",
-    "Cutting",
-    "Embroidery",
-    "Finished Stock",
-    "Sale",
-    "Khata",
-  ];
+function AppShellFallback() {
   return (
-    <section className="rounded-2xl border border-[#e5e7eb] bg-white px-4 py-2.5">
-      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-[#111827]">Textile Workflow</h3>
-          <p className="text-xs text-[#64748b]">Kora kapra moves from meters to suits, then into khata.</p>
+    <div className="flex h-screen overflow-hidden bg-[#f4f6f8] text-[#111827]">
+      <aside className="hidden h-screen w-[260px] shrink-0 border-r border-slate-200 bg-white lg:block" />
+      <main className="min-h-0 flex-1 overflow-hidden">
+        <header className="h-[118px] border-b border-slate-200 bg-white" />
+        <div className="p-6 lg:p-7">
+          <div className="h-24 rounded-xl border border-slate-200 bg-white" />
         </div>
-      </div>
-      <div className="grid gap-1 lg:grid-cols-7">
-        {steps.map((step, index) => (
-          <div key={step} className="relative rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 after:absolute after:left-full after:top-1/2 after:hidden after:h-px after:w-1 after:bg-slate-200 lg:after:block last:after:hidden">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-medium text-slate-400">0{index + 1}</span>
-              <span className="h-1.5 w-1.5 rounded-full bg-[#0f766e]" />
+      </main>
+    </div>
+  );
+}
+
+function DashboardWorkflow() {
+  const steps = ["Purchase", "Processing", "Cutting", "Embroidery", "Stock", "Sale", "Khata"];
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm shadow-slate-200/50">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+        <div className="min-w-[150px]">
+          <h3 className="text-sm font-semibold text-slate-950">Textile Workflow</h3>
+          <p className="text-xs text-slate-500">Meters to suits to khata</p>
+        </div>
+        <div className="grid flex-1 gap-2 sm:grid-cols-2 lg:grid-cols-7">
+          {steps.map((step, index) => (
+            <div key={step} className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+              <div className="flex items-center gap-2">
+                <span className="grid h-5 w-5 place-items-center rounded-full bg-white text-[10px] font-semibold text-[#0f766e] ring-1 ring-teal-100">
+                  {index + 1}
+                </span>
+                <span className="truncate text-xs font-medium text-slate-700">{step}</span>
+              </div>
             </div>
-            <p className="mt-0.5 truncate text-[11px] font-medium text-slate-800">{step}</p>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function FocusItem({
-  label,
-  value,
-  badge,
-  tone = "emerald",
-}: {
-  label: string;
-  value: string;
-  badge?: string;
-  tone?: "emerald" | "amber" | "rose";
-}) {
-  const dotTone = tone === "rose" ? "bg-[#dc2626]" : tone === "amber" ? "bg-[#d97706]" : "bg-[#16a34a]";
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
-      <div className="flex items-start gap-2">
-        <span className={classNames("mt-1.5 h-2 w-2 shrink-0 rounded-full", dotTone)} />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-slate-900">{label}</p>
-          <p className="mt-1 text-sm font-semibold text-slate-700">{value}</p>
-          {badge ? <div className="mt-2"><Badge label={badge} tone={tone} /></div> : null}
+          ))}
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -2093,9 +2269,24 @@ function SummaryStat({ label, value, tone }: { label: string; value: string; ton
   );
 }
 
+function QuickAction({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex h-11 items-center justify-between rounded-xl border border-slate-200 bg-white px-3 text-left text-sm font-semibold text-slate-700 shadow-sm shadow-slate-200/50 transition hover:border-teal-200 hover:bg-[#eefdf8] hover:text-[#0f766e]"
+    >
+      <span>{label}</span>
+      <span className="grid h-6 w-6 place-items-center rounded-full border border-slate-200 bg-slate-50 text-xs text-slate-500 transition group-hover:border-teal-200 group-hover:bg-white group-hover:text-[#0f766e]">
+        +
+      </span>
+    </button>
+  );
+}
+
 function Panel({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-xl border border-gray-200 bg-white">
+    <section className="rounded-xl border border-gray-200 bg-white shadow-sm shadow-slate-200/40">
       <div className="border-b border-gray-100 px-4 py-3">
         <h3 className="text-sm font-semibold text-gray-950">{title}</h3>
         {subtitle ? <p className="mt-0.5 text-xs leading-5 text-gray-500">{subtitle}</p> : null}
@@ -2106,7 +2297,7 @@ function Panel({ title, subtitle, children }: { title: string; subtitle?: string
 }
 
 function TwoColumn({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
-  return <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">{left}{right}</div>;
+  return <div className="grid items-start gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">{left}{right}</div>;
 }
 
 function MetricCard({
@@ -2147,12 +2338,12 @@ function MetricCard({
     slate: "text-slate-900",
   };
   return (
-    <div className={classNames(compact ? "min-h-[78px]" : "min-h-[96px]", "rounded-xl border border-gray-200 border-t-2 bg-white p-2.5", borderTones[tone])}>
+    <div className={classNames(compact ? "min-h-[88px]" : "min-h-[106px]", "rounded-xl border border-gray-200 border-t-2 bg-white p-3 shadow-sm shadow-slate-200/40", borderTones[tone])}>
       <div className="mb-1 flex items-start gap-2">
         <div className={classNames("h-1.5 w-1.5 rounded-full", tones[tone])} />
-        <p className={classNames(compact ? "min-h-0" : "min-h-[24px]", "text-[10px] font-medium uppercase leading-3 tracking-[0.08em] text-gray-500")}>{label}</p>
+        <p className={classNames(compact ? "min-h-0" : "min-h-[24px]", "text-[10px] font-semibold uppercase leading-3 tracking-[0.08em] text-gray-500")}>{label}</p>
       </div>
-      <p className={classNames(compact ? "text-lg" : "text-xl", "font-semibold leading-6 tracking-tight", textTones[tone])}>{value}</p>
+      <p className={classNames(compact ? "text-xl" : "text-2xl", "font-semibold leading-7 tracking-tight tabular-nums", textTones[tone])}>{value}</p>
       {helper ? <p className="mt-0.5 truncate text-[11px] text-gray-500">{helper}</p> : null}
     </div>
   );
@@ -2168,7 +2359,19 @@ function Badge({ label, tone }: { label: string; tone: "emerald" | "amber" | "ro
   return <span className={classNames("inline-flex rounded-full border px-2 py-0.5 text-xs font-medium", tones[tone])}>{label}</span>;
 }
 
-function DataTable({ headers, rows, empty }: { headers: string[]; rows: React.ReactNode[][]; empty: string }) {
+function DataTable({
+  headers,
+  rows,
+  empty,
+  compact = false,
+  tableClassName = "min-w-[720px]",
+}: {
+  headers: string[];
+  rows: React.ReactNode[][];
+  empty: string;
+  compact?: boolean;
+  tableClassName?: string;
+}) {
   const numericHeaders = new Set([
     "Purchased",
     "Raw available",
@@ -2182,6 +2385,7 @@ function DataTable({ headers, rows, empty }: { headers: string[]; rows: React.Re
     "Meters used",
     "Front",
     "Back",
+    "Total",
     "Total/suit",
     "Total/Suit",
     "Suits",
@@ -2192,6 +2396,13 @@ function DataTable({ headers, rows, empty }: { headers: string[]; rows: React.Re
     "Total",
     "Paid",
     "Balance",
+    "Total payable",
+    "Total Sales",
+    "Amount received",
+    "A category sold",
+    "B category sold",
+    "Sales",
+    "Received",
     "Quantity",
     "A category received",
     "B category",
@@ -2204,16 +2415,20 @@ function DataTable({ headers, rows, empty }: { headers: string[]; rows: React.Re
     "Cost",
     "A Profit",
     "B Profit",
+    "A Sale Price",
+    "B Sale Price",
+    "Cost/Suit",
+    "Stock Value",
   ]);
   return (
     <div className="thin-scrollbar overflow-x-auto rounded-lg border border-gray-200 bg-white">
-      <table className="w-full min-w-[720px] text-left text-[13px]">
+      <table className={classNames("w-full text-left text-[13px]", tableClassName)}>
         <thead className="bg-gray-50 text-[10px] uppercase tracking-[0.08em] text-gray-500">
           <tr>
             {headers.map((header) => {
               const isNumeric = numericHeaders.has(header);
               return (
-                <th key={header} className={classNames("whitespace-nowrap px-3 py-2.5 font-semibold", isNumeric && "text-right")}>
+                <th key={header} className={classNames("whitespace-nowrap font-semibold", compact ? "px-2.5 py-2" : "px-3 py-2.5", isNumeric && "text-right")}>
                   {header}
                 </th>
               );
@@ -2231,7 +2446,7 @@ function DataTable({ headers, rows, empty }: { headers: string[]; rows: React.Re
                 {row.map((cell, cellIndex) => {
                   const isNumeric = numericHeaders.has(headers[cellIndex]);
                   return (
-                    <td key={`cell-${cellIndex}`} className={classNames("whitespace-nowrap px-3 py-2.5 font-normal text-gray-700", isNumeric && "text-right tabular-nums")}>
+                    <td key={`cell-${cellIndex}`} className={classNames("whitespace-nowrap font-normal text-gray-700", compact ? "px-2.5 py-2" : "px-3 py-2.5", isNumeric && "text-right tabular-nums")}>
                       {cell}
                     </td>
                   );
@@ -2247,14 +2462,14 @@ function DataTable({ headers, rows, empty }: { headers: string[]; rows: React.Re
 
 function TextInput({ label, value, onChange, placeholder, type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; type?: string }) {
   return (
-    <label className="grid gap-1 text-[13px] font-medium text-gray-700">
+    <label className="grid min-w-0 gap-1 text-[13px] font-medium text-gray-700">
       <span>{label}</span>
       <input
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm font-normal text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-teal-700 focus:ring-2 focus:ring-teal-700/10"
+        className="h-10 min-w-0 rounded-lg border border-gray-300 bg-white px-3 text-sm font-normal text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-teal-700 focus:ring-2 focus:ring-teal-700/10"
       />
     </label>
   );
@@ -2277,12 +2492,12 @@ function SmallNumber({ value, onChange }: { value: string; onChange: (value: str
 
 function SelectInput({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
   return (
-    <label className="grid gap-1 text-[13px] font-medium text-gray-700">
+    <label className="grid min-w-0 gap-1 text-[13px] font-medium text-gray-700">
       <span>{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm font-normal text-gray-900 outline-none transition focus:border-teal-700 focus:ring-2 focus:ring-teal-700/10"
+        className="h-10 min-w-0 rounded-lg border border-gray-300 bg-white px-3 text-sm font-normal text-gray-900 outline-none transition focus:border-teal-700 focus:ring-2 focus:ring-teal-700/10"
       >
         <option value="">Select</option>
         {options.map((option) => (
@@ -2295,13 +2510,27 @@ function SelectInput({ label, value, onChange, options }: { label: string; value
 
 function TextArea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
-    <label className="grid gap-1 text-[13px] font-medium text-gray-700">
+    <label className="grid min-w-0 gap-1 text-[13px] font-medium text-gray-700">
       <span>{label}</span>
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        rows={3}
-        className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-normal text-gray-900 outline-none transition focus:border-teal-700 focus:ring-2 focus:ring-teal-700/10"
+        rows={2}
+        className="min-w-0 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-normal text-gray-900 outline-none transition focus:border-teal-700 focus:ring-2 focus:ring-teal-700/10"
+      />
+    </label>
+  );
+}
+
+function CompactTextArea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="grid min-w-0 gap-1 text-[13px] font-medium text-gray-700">
+      <span>{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={1}
+        className="min-w-0 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-normal text-gray-900 outline-none transition focus:border-teal-700 focus:ring-2 focus:ring-teal-700/10"
       />
     </label>
   );
@@ -2320,7 +2549,7 @@ function PrimaryButton({ children }: { children: React.ReactNode }) {
   return (
     <button
       type="submit"
-      className="h-10 rounded-lg bg-teal-700 px-4 text-sm font-medium text-white transition hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-700/25"
+      className="h-10 rounded-lg bg-teal-700 px-4 text-sm font-medium text-white shadow-sm shadow-teal-900/10 transition hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-700/25"
     >
       {children}
     </button>
