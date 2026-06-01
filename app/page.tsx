@@ -149,6 +149,14 @@ type AppData = {
   ledgerEntries: LedgerEntry[];
 };
 
+type BusinessSettings = {
+  businessName: string;
+  businessSubtitle: string;
+  locationBadge: string;
+  currencyLabel: string;
+  demoLabel: string;
+};
+
 type PurchaseForm = {
   supplierName: string;
   lotNumber: string;
@@ -478,6 +486,15 @@ const seedLedgerEntries: LedgerEntry[] = [
 ];
 
 const appStorageKey = "ali-pasha-fabrics-system:v1";
+const settingsStorageKey = "ali-pasha-fabrics-system:settings:v1";
+
+const defaultBusinessSettings: BusinessSettings = {
+  businessName: "Ali Pasha Fabrics",
+  businessSubtitle: "Textile Workflow System",
+  locationBadge: "Chiniot Bazaar",
+  currencyLabel: "Rs",
+  demoLabel: "Local demo · Sample data",
+};
 
 const seedAppData: AppData = {
   suppliers: seedSuppliers,
@@ -491,6 +508,21 @@ const seedAppData: AppData = {
   sales: seedSales,
   ledgerEntries: seedLedgerEntries,
 };
+
+function createBlankAppData(): AppData {
+  return {
+    suppliers: [],
+    vendors: [],
+    customers: [],
+    rawLots: [],
+    processingJobs: [],
+    cuttingJobs: [],
+    embroideryJobs: [],
+    finishedArticles: [],
+    sales: [],
+    ledgerEntries: [],
+  };
+}
 
 function formatPKR(amount: number) {
   return new Intl.NumberFormat("en-PK", {
@@ -548,6 +580,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readArray<T>(source: Record<string, unknown>, key: keyof AppData, fallback: T[]) {
   return Array.isArray(source[key]) ? (source[key] as T[]) : fallback;
+}
+
+function readString(source: Record<string, unknown>, key: keyof BusinessSettings, fallback: string) {
+  return typeof source[key] === "string" ? source[key] : fallback;
+}
+
+function parseSavedBusinessSettings(raw: string | null): BusinessSettings | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) return null;
+    return {
+      businessName: readString(parsed, "businessName", defaultBusinessSettings.businessName),
+      businessSubtitle: readString(parsed, "businessSubtitle", defaultBusinessSettings.businessSubtitle),
+      locationBadge: readString(parsed, "locationBadge", defaultBusinessSettings.locationBadge),
+      currencyLabel: readString(parsed, "currencyLabel", defaultBusinessSettings.currencyLabel),
+      demoLabel: readString(parsed, "demoLabel", defaultBusinessSettings.demoLabel),
+    };
+  } catch (error) {
+    console.warn("Ali Pasha settings load failed. Falling back to defaults.", error);
+    return null;
+  }
 }
 
 function parseSavedAppData(raw: string | null): AppData | null {
@@ -896,6 +950,9 @@ function AliPashaApp() {
     amount: "",
     note: "",
   });
+  const [businessSettings, setBusinessSettings] = useState<BusinessSettings>(defaultBusinessSettings);
+  const [settingsForm, setSettingsForm] = useState<BusinessSettings>(defaultBusinessSettings);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   function navigateToSection(section: Section) {
     const params = new URLSearchParams(searchParams.toString());
@@ -919,22 +976,35 @@ function AliPashaApp() {
     [suppliers, vendors, customers, rawLots, processingJobs, cuttingJobs, embroideryJobs, finishedArticles, sales, ledgerEntries],
   );
 
+  function applyAppData(data: AppData) {
+    setSuppliers(data.suppliers);
+    setVendors(data.vendors);
+    setCustomers(data.customers);
+    setRawLots(data.rawLots);
+    setProcessingJobs(data.processingJobs);
+    setCuttingJobs(data.cuttingJobs);
+    setEmbroideryJobs(data.embroideryJobs);
+    setFinishedArticles(data.finishedArticles);
+    setSales(data.sales);
+    setLedgerEntries(data.ledgerEntries);
+  }
+
   useEffect(() => {
     const savedData = parseSavedAppData(window.localStorage.getItem(appStorageKey));
     queueMicrotask(() => {
       if (savedData) {
-        setSuppliers(savedData.suppliers);
-        setVendors(savedData.vendors);
-        setCustomers(savedData.customers);
-        setRawLots(savedData.rawLots);
-        setProcessingJobs(savedData.processingJobs);
-        setCuttingJobs(savedData.cuttingJobs);
-        setEmbroideryJobs(savedData.embroideryJobs);
-        setFinishedArticles(savedData.finishedArticles);
-        setSales(savedData.sales);
-        setLedgerEntries(savedData.ledgerEntries);
+        applyAppData(savedData);
       }
       setHasLoadedAppState(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    const savedSettings = parseSavedBusinessSettings(window.localStorage.getItem(settingsStorageKey));
+    if (!savedSettings) return;
+    queueMicrotask(() => {
+      setBusinessSettings(savedSettings);
+      setSettingsForm(savedSettings);
     });
   }, []);
 
@@ -954,6 +1024,56 @@ function AliPashaApp() {
   }, [appData, hasLoadedAppState]);
 
   const totals = useMemo(() => calculateAppTotals(appData), [appData]);
+
+  function handleStartFresh() {
+    const confirmed = window.confirm("This will clear demo data in this browser and start a blank workspace. Continue?");
+    if (!confirmed) return;
+    const blankData = createBlankAppData();
+    try {
+      window.localStorage.setItem(appStorageKey, JSON.stringify(blankData));
+      applyAppData(blankData);
+      setHasLoadedAppState(true);
+    } catch (error) {
+      console.warn("Ali Pasha blank workspace save failed.", error);
+      alert("Data could not be saved. Please do not close or refresh the browser until this is fixed.");
+    }
+  }
+
+  function openSettings() {
+    setSettingsForm(businessSettings);
+    setIsSettingsOpen(true);
+  }
+
+  function handleSaveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextSettings: BusinessSettings = {
+      businessName: settingsForm.businessName.trim() || defaultBusinessSettings.businessName,
+      businessSubtitle: settingsForm.businessSubtitle.trim() || defaultBusinessSettings.businessSubtitle,
+      locationBadge: settingsForm.locationBadge.trim() || defaultBusinessSettings.locationBadge,
+      currencyLabel: settingsForm.currencyLabel.trim() || defaultBusinessSettings.currencyLabel,
+      demoLabel: settingsForm.demoLabel.trim() || defaultBusinessSettings.demoLabel,
+    };
+    try {
+      window.localStorage.setItem(settingsStorageKey, JSON.stringify(nextSettings));
+      setBusinessSettings(nextSettings);
+      setSettingsForm(nextSettings);
+      setIsSettingsOpen(false);
+    } catch (error) {
+      console.warn("Ali Pasha settings save failed.", error);
+      alert("Settings could not be saved in this browser.");
+    }
+  }
+
+  function handleResetSettings() {
+    try {
+      window.localStorage.setItem(settingsStorageKey, JSON.stringify(defaultBusinessSettings));
+      setBusinessSettings(defaultBusinessSettings);
+      setSettingsForm(defaultBusinessSettings);
+    } catch (error) {
+      console.warn("Ali Pasha settings reset failed.", error);
+      alert("Settings could not be reset in this browser.");
+    }
+  }
 
   const customerSummaries = useMemo(
     () => getCustomerSummaries(customers, sales, ledgerEntries),
@@ -1548,9 +1668,9 @@ function AliPashaApp() {
 
   const activeTitle =
     activeSection === "Dashboard"
-      ? "Ali Pasha Fabrics System"
+      ? businessSettings.businessName
       : activeSection;
-  const activeSubtitle = navMeta[activeSection].subtitle;
+  const activeSubtitle = activeSection === "Dashboard" ? businessSettings.businessSubtitle : navMeta[activeSection].subtitle;
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#f4f6f8] text-[#111827]">
@@ -1561,12 +1681,12 @@ function AliPashaApp() {
               AP
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-sm font-semibold tracking-tight text-slate-950">Ali Pasha Fabrics</h1>
-              <p className="mt-0.5 text-xs text-slate-500">Textile Workflow System</p>
+              <h1 className="truncate text-sm font-semibold tracking-tight text-slate-950">{businessSettings.businessName}</h1>
+              <p className="mt-0.5 text-xs text-slate-500">{businessSettings.businessSubtitle}</p>
             </div>
           </div>
           <span className="mt-3 inline-flex rounded-full border border-teal-100 bg-[#eefdf8] px-2.5 py-1 text-[11px] font-medium text-[#0f766e]">
-            Chiniot Bazaar
+            {businessSettings.locationBadge}
           </span>
         </div>
 
@@ -1618,7 +1738,15 @@ function AliPashaApp() {
               <div className="flex flex-wrap gap-2 text-xs font-medium">
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-slate-600">Meters before cutting</span>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-slate-600">Suits after cutting</span>
-                <span className="rounded-full border border-teal-100 bg-[#eefdf8] px-3 py-1.5 text-[#0f766e]">Local demo</span>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-slate-600">Currency: {businessSettings.currencyLabel}</span>
+                <span className="rounded-full border border-teal-100 bg-[#eefdf8] px-3 py-1.5 text-[#0f766e]">{businessSettings.demoLabel}</span>
+                <button
+                  type="button"
+                  onClick={openSettings}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-700 transition hover:border-teal-200 hover:bg-[#eefdf8] hover:text-[#0f766e] focus:outline-none focus:ring-2 focus:ring-teal-700/15"
+                >
+                  Settings
+                </button>
               </div>
               <select
                 value={activeSection}
@@ -1634,6 +1762,58 @@ function AliPashaApp() {
 
         <div className="space-y-4 px-6 pb-5 pt-6 lg:px-7">{renderSection()}</div>
       </main>
+      {isSettingsOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 px-4 py-6">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-slate-950">Business Settings</h3>
+                <p className="mt-1 text-sm text-slate-500">Local browser settings for this demo only.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+            <form onSubmit={handleSaveSettings} className="grid gap-3 px-5 py-4">
+              <TextInput label="Business name" value={settingsForm.businessName} onChange={(value) => setSettingsForm({ ...settingsForm, businessName: value })} />
+              <TextInput label="Business subtitle/tagline" value={settingsForm.businessSubtitle} onChange={(value) => setSettingsForm({ ...settingsForm, businessSubtitle: value })} />
+              <TextInput label="Location badge text" value={settingsForm.locationBadge} onChange={(value) => setSettingsForm({ ...settingsForm, locationBadge: value })} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <TextInput label="Currency label" value={settingsForm.currencyLabel} onChange={(value) => setSettingsForm({ ...settingsForm, currencyLabel: value })} />
+                <TextInput label="Demo label" value={settingsForm.demoLabel} onChange={(value) => setSettingsForm({ ...settingsForm, demoLabel: value })} />
+              </div>
+              <div className="mt-1 flex flex-col gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="submit"
+                    className="h-10 rounded-lg bg-teal-700 px-4 text-sm font-medium text-white shadow-sm shadow-teal-900/10 transition hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-700/25"
+                  >
+                    Save Settings
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetSettings}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-700/15"
+                  >
+                    Reset Settings
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleStartFresh}
+                  className="h-10 rounded-lg border border-rose-200 bg-white px-4 text-sm font-medium text-rose-700 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-700/15"
+                >
+                  Start Fresh
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -1697,6 +1877,16 @@ function AliPashaApp() {
                   </div>
                 </Panel>
                 <Panel title="Quick Actions">
+                  <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <span className="text-xs font-medium text-slate-600">Want a clean browser workspace?</span>
+                    <button
+                      type="button"
+                      onClick={handleStartFresh}
+                      className="shrink-0 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition hover:border-teal-200 hover:bg-[#eefdf8] hover:text-[#0f766e] focus:outline-none focus:ring-2 focus:ring-teal-700/15"
+                    >
+                      Start Fresh
+                    </button>
+                  </div>
                   <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
                     <QuickAction label="Add Sale" onClick={() => navigateToSection("Sales")} />
                     <QuickAction label="Add Purchase" onClick={() => navigateToSection("Kora Purchase")} />
