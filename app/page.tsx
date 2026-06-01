@@ -1697,7 +1697,7 @@ function AliPashaApp() {
                   </div>
                 </Panel>
                 <Panel title="Quick Actions">
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
                     <QuickAction label="Add Sale" onClick={() => navigateToSection("Sales")} />
                     <QuickAction label="Add Purchase" onClick={() => navigateToSection("Kora Purchase")} />
                     <QuickAction label="Add Customer" onClick={() => navigateToSection("Customer Khata")} />
@@ -2530,10 +2530,10 @@ function QuickAction({ label, onClick }: { label: string; onClick: () => void })
     <button
       type="button"
       onClick={onClick}
-      className="group flex h-11 items-center justify-between rounded-xl border border-slate-200 bg-white px-3 text-left text-sm font-semibold text-slate-700 shadow-sm shadow-slate-200/50 transition hover:border-teal-200 hover:bg-[#eefdf8] hover:text-[#0f766e]"
+      className="group flex min-h-10 min-w-0 items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-left text-sm font-medium text-slate-700 shadow-sm shadow-slate-200/40 transition hover:border-teal-200 hover:bg-[#eefdf8] hover:text-[#0f766e] focus:outline-none focus:ring-2 focus:ring-teal-700/15"
     >
-      <span>{label}</span>
-      <span className="grid h-6 w-6 place-items-center rounded-full border border-slate-200 bg-slate-50 text-xs text-slate-500 transition group-hover:border-teal-200 group-hover:bg-white group-hover:text-[#0f766e]">
+      <span className="min-w-0 whitespace-nowrap leading-5">{label}</span>
+      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-slate-200 bg-slate-50 text-xs leading-none text-slate-500 transition group-hover:border-teal-200 group-hover:bg-white group-hover:text-[#0f766e]">
         +
       </span>
     </button>
