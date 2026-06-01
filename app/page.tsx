@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 type Section =
@@ -134,6 +134,19 @@ type LedgerEntry = {
   debit: number;
   credit: number;
   notes: string;
+};
+
+type AppData = {
+  suppliers: Supplier[];
+  vendors: Vendor[];
+  customers: Customer[];
+  rawLots: RawLot[];
+  processingJobs: ProcessingJob[];
+  cuttingJobs: CuttingJob[];
+  embroideryJobs: EmbroideryJob[];
+  finishedArticles: FinishedArticle[];
+  sales: Sale[];
+  ledgerEntries: LedgerEntry[];
 };
 
 type PurchaseForm = {
@@ -372,7 +385,7 @@ const seedFinishedArticles: FinishedArticle[] = [
     id: "art-1",
     articleNumber: "A-501",
     sourceLotId: "lot-1",
-    aCategorySuits: 320,
+    aCategorySuits: 300,
     bCategorySuits: 3,
     costPerSuit: 1150,
     aCategorySalePrice: 1600,
@@ -447,7 +460,7 @@ const seedLedgerEntries: LedgerEntry[] = [
     partyName: "Star Embroidery",
     partyType: "Vendor",
     description: "Embroidery Article A-501",
-    debit: 57600,
+    debit: 58140,
     credit: 0,
     notes: "Embroidery payable",
   },
@@ -463,6 +476,21 @@ const seedLedgerEntries: LedgerEntry[] = [
     notes: "Partial credit balance",
   },
 ];
+
+const appStorageKey = "ali-pasha-fabrics-system:v1";
+
+const seedAppData: AppData = {
+  suppliers: seedSuppliers,
+  vendors: seedVendors,
+  customers: seedCustomers,
+  rawLots: seedRawLots,
+  processingJobs: seedProcessingJobs,
+  cuttingJobs: seedCuttingJobs,
+  embroideryJobs: seedEmbroideryJobs,
+  finishedArticles: seedFinishedArticles,
+  sales: seedSales,
+  ledgerEntries: seedLedgerEntries,
+};
 
 function formatPKR(amount: number) {
   return new Intl.NumberFormat("en-PK", {
@@ -483,6 +511,10 @@ function formatSuits(value: number) {
 function toNumber(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isWholeNumber(value: number) {
+  return Number.isInteger(value);
 }
 
 function makeId(prefix: string) {
@@ -510,6 +542,268 @@ function getLotStatus(lot: RawLot, processingJobs: ProcessingJob[], cuttingJobs:
   return "In Shop";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readArray<T>(source: Record<string, unknown>, key: keyof AppData, fallback: T[]) {
+  return Array.isArray(source[key]) ? (source[key] as T[]) : fallback;
+}
+
+function parseSavedAppData(raw: string | null): AppData | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) return null;
+    return reconcileSavedAppData({
+      suppliers: readArray<Supplier>(parsed, "suppliers", seedSuppliers),
+      vendors: readArray<Vendor>(parsed, "vendors", seedVendors),
+      customers: readArray<Customer>(parsed, "customers", seedCustomers),
+      rawLots: readArray<RawLot>(parsed, "rawLots", seedRawLots),
+      processingJobs: readArray<ProcessingJob>(parsed, "processingJobs", seedProcessingJobs),
+      cuttingJobs: readArray<CuttingJob>(parsed, "cuttingJobs", seedCuttingJobs),
+      embroideryJobs: readArray<EmbroideryJob>(parsed, "embroideryJobs", seedEmbroideryJobs),
+      finishedArticles: readArray<FinishedArticle>(parsed, "finishedArticles", seedFinishedArticles),
+      sales: readArray<Sale>(parsed, "sales", seedSales),
+      ledgerEntries: readArray<LedgerEntry>(parsed, "ledgerEntries", seedLedgerEntries),
+    });
+  } catch (error) {
+    console.warn("Ali Pasha data load failed. Falling back to demo data.", error);
+    return null;
+  }
+}
+
+function calculateExpectedArticleStock(data: AppData, article: FinishedArticle) {
+  const cuttingCreated = data.cuttingJobs
+    .filter((job) => job.articleNumber === article.articleNumber)
+    .reduce((sum, job) => sum + job.suitsCreated, 0);
+  const embroiderySent = data.embroideryJobs
+    .filter((job) => job.articleId === article.id)
+    .reduce((sum, job) => sum + job.sentSuits, 0);
+  const embroideryAReceived = data.embroideryJobs
+    .filter((job) => job.articleId === article.id && job.status === "Received")
+    .reduce((sum, job) => sum + job.receivedASuits, 0);
+  const embroideryBReceived = data.embroideryJobs
+    .filter((job) => job.articleId === article.id && job.status === "Received")
+    .reduce((sum, job) => sum + job.bCategorySuits, 0);
+  const soldA = data.sales
+    .filter((sale) => sale.articleId === article.id && sale.category === "A Category")
+    .reduce((sum, sale) => sum + sale.quantity, 0);
+  const soldB = data.sales
+    .filter((sale) => sale.articleId === article.id && sale.category === "B Category")
+    .reduce((sum, sale) => sum + sale.quantity, 0);
+
+  if (cuttingCreated === 0) {
+    return { aCategorySuits: article.aCategorySuits, bCategorySuits: article.bCategorySuits };
+  }
+
+  return {
+    aCategorySuits: Math.max(cuttingCreated - embroiderySent + embroideryAReceived - soldA, 0),
+    bCategorySuits: Math.max(embroideryBReceived - soldB, 0),
+  };
+}
+
+function reconcileArticleStock(data: AppData): AppData {
+  return {
+    ...data,
+    finishedArticles: data.finishedArticles.map((article) => ({
+      ...article,
+      ...calculateExpectedArticleStock(data, article),
+    })),
+  };
+}
+
+function reconcileSavedAppData(data: AppData): AppData {
+  const ledgerEntries = data.ledgerEntries.map((entry) =>
+    entry.id === "led-3" && entry.partyId === "ven-2" && entry.description === "Embroidery Article A-501" && entry.debit === 57600
+      ? { ...entry, debit: 58140 }
+      : entry,
+  );
+  return reconcileArticleStock({ ...data, ledgerEntries });
+}
+
+function calculateAppTotals(data: AppData) {
+  const rawInShop = data.rawLots.reduce((sum, lot) => sum + lot.rawAvailableMeters, 0);
+  const withProcessing = data.processingJobs
+    .filter((job) => job.status === "Sent")
+    .reduce((sum, job) => sum + job.sentMeters, 0);
+  const processedReady = data.rawLots.reduce((sum, lot) => sum + lot.processedMeters, 0);
+  const withEmbroidery = data.embroideryJobs
+    .filter((job) => job.status === "Sent")
+    .reduce((sum, job) => sum + job.sentSuits, 0);
+  const readyAStock = data.finishedArticles.reduce((sum, article) => sum + article.aCategorySuits, 0);
+  const readyBStock = data.finishedArticles.reduce((sum, article) => sum + article.bCategorySuits, 0);
+  const readyStock = readyAStock + readyBStock;
+  const totalSales = data.sales.reduce((sum, sale) => sum + sale.total, 0);
+  const totalReceived = data.ledgerEntries
+    .filter((entry) => entry.partyType === "Customer")
+    .reduce((sum, entry) => sum + entry.credit, 0);
+  const customerCredit = data.ledgerEntries
+    .filter((entry) => entry.partyType === "Customer")
+    .reduce((sum, entry) => sum + entry.debit - entry.credit, 0);
+  const supplierPayable = data.ledgerEntries
+    .filter((entry) => entry.partyType === "Supplier")
+    .reduce((sum, entry) => sum + entry.debit - entry.credit, 0);
+  const vendorPayable = data.ledgerEntries
+    .filter((entry) => entry.partyType === "Vendor")
+    .reduce((sum, entry) => sum + entry.debit - entry.credit, 0);
+  const processingCost = data.processingJobs.reduce(
+    (sum, job) => sum + (job.status === "Received" ? job.sentMeters * job.ratePerMeter : 0),
+    0,
+  );
+  const embroideryCost = data.embroideryJobs.reduce(
+    (sum, job) => sum + (job.status === "Received" ? job.sentSuits * job.ratePerSuit : 0),
+    0,
+  );
+  const purchases = data.rawLots.reduce((sum, lot) => sum + lot.purchasedMeters * lot.ratePerMeter, 0);
+  const rawMetersPurchased = data.rawLots.reduce((sum, lot) => sum + lot.purchasedMeters, 0);
+  const aCategoryStockValue = data.finishedArticles.reduce(
+    (sum, article) => sum + article.aCategorySuits * article.costPerSuit,
+    0,
+  );
+  const bCategoryStockValue = data.finishedArticles.reduce(
+    (sum, article) => sum + article.bCategorySuits * article.costPerSuit,
+    0,
+  );
+  const readyStockValue = aCategoryStockValue + bCategoryStockValue;
+  const estimatedProfit = data.sales.reduce((sum, sale) => {
+    const article = data.finishedArticles.find((item) => item.id === sale.articleId);
+    return sum + sale.quantity * (sale.rate - (article?.costPerSuit ?? 0));
+  }, 0);
+  const estimatedAProfit = data.sales.reduce((sum, sale) => {
+    const article = data.finishedArticles.find((item) => item.id === sale.articleId);
+    return sale.category === "A Category" ? sum + sale.quantity * (sale.rate - (article?.costPerSuit ?? 0)) : sum;
+  }, 0);
+  const estimatedBProfit = data.sales.reduce((sum, sale) => {
+    const article = data.finishedArticles.find((item) => item.id === sale.articleId);
+    return sale.category === "B Category" ? sum + sale.quantity * (sale.rate - (article?.costPerSuit ?? 0)) : sum;
+  }, 0);
+  const processingLoss = data.processingJobs.reduce((sum, job) => sum + job.lossMeters, 0);
+  const bCategoryQuantity = data.finishedArticles.reduce((sum, article) => sum + article.bCategorySuits, 0);
+  const embroideryBCategory = data.embroideryJobs.reduce((sum, job) => sum + job.bCategorySuits, 0);
+  const embroideryMissing = data.embroideryJobs.reduce((sum, job) => sum + job.missingSuits, 0);
+
+  return {
+    rawInShop,
+    withProcessing,
+    processedReady,
+    withEmbroidery,
+    readyAStock,
+    readyBStock,
+    readyStock,
+    totalSales,
+    totalReceived,
+    customerCredit,
+    supplierPayable,
+    vendorPayable,
+    supplierVendorPayable: supplierPayable + vendorPayable,
+    processingCost,
+    embroideryCost,
+    purchases,
+    rawMetersPurchased,
+    aCategoryStockValue,
+    bCategoryStockValue,
+    readyStockValue,
+    estimatedProfit,
+    estimatedAProfit,
+    estimatedBProfit,
+    processingLoss,
+    bCategoryQuantity,
+    embroideryBCategory,
+    embroideryMissing,
+  };
+}
+
+function getCustomerSummaries(customers: Customer[], sales: Sale[], ledgerEntries: LedgerEntry[]) {
+  return customers.map((customer) => {
+    const customerSales = sales.filter((sale) => sale.customerId === customer.id);
+    const entries = ledgerEntries.filter((entry) => entry.partyId === customer.id);
+    return {
+      customer,
+      totalSales: customerSales.reduce((sum, sale) => sum + sale.total, 0),
+      totalPaid: entries.reduce((sum, entry) => sum + entry.credit, 0),
+      balance: balanceFor(ledgerEntries, customer.id),
+      lastSaleDate: customerSales.at(-1)?.date ?? "-",
+    };
+  });
+}
+
+function getPayableSummaries(suppliers: Supplier[], vendors: Vendor[], ledgerEntries: LedgerEntry[]) {
+  const supplierRows = suppliers.map((supplier) => {
+    const entries = ledgerEntries.filter((entry) => entry.partyId === supplier.id);
+    return {
+      id: supplier.id,
+      name: supplier.name,
+      type: "Supplier" as const,
+      payable: entries.reduce((sum, entry) => sum + entry.debit, 0),
+      paid: entries.reduce((sum, entry) => sum + entry.credit, 0),
+      balance: balanceFor(ledgerEntries, supplier.id),
+      lastActivity: entries.at(-1)?.date ?? "-",
+      notes: supplier.notes ?? "",
+    };
+  });
+  const vendorRows = vendors.map((vendor) => {
+    const entries = ledgerEntries.filter((entry) => entry.partyId === vendor.id);
+    return {
+      id: vendor.id,
+      name: vendor.name,
+      type: "Vendor" as const,
+      payable: entries.reduce((sum, entry) => sum + entry.debit, 0),
+      paid: entries.reduce((sum, entry) => sum + entry.credit, 0),
+      balance: balanceFor(ledgerEntries, vendor.id),
+      lastActivity: entries.at(-1)?.date ?? "-",
+      notes: vendor.notes ?? vendor.service,
+    };
+  });
+  return [...supplierRows, ...vendorRows];
+}
+
+function getArticleStock(finishedArticles: FinishedArticle[], articleId: string, category: Sale["category"]) {
+  const article = finishedArticles.find((item) => item.id === articleId);
+  if (!article) return 0;
+  return category === "A Category" ? article.aCategorySuits : article.bCategorySuits;
+}
+
+function runConsistencyChecks(data: AppData) {
+  const customerLedgerTotal = data.ledgerEntries
+    .filter((entry) => entry.partyType === "Customer")
+    .reduce((sum, entry) => sum + entry.debit - entry.credit, 0);
+  const customerCreditFromSalesAndPayments =
+    data.sales.reduce((sum, sale) => sum + sale.total, 0) -
+    data.ledgerEntries
+      .filter((entry) => entry.partyType === "Customer")
+      .reduce((sum, entry) => sum + entry.credit, 0);
+  if (customerLedgerTotal !== customerCreditFromSalesAndPayments) {
+    console.warn("Customer khata consistency warning", { customerLedgerTotal, customerCreditFromSalesAndPayments });
+  }
+
+  const vendorLedgerPayable = data.ledgerEntries
+    .filter((entry) => entry.partyType === "Vendor")
+    .reduce((sum, entry) => sum + entry.debit - entry.credit, 0);
+  const vendorCosts =
+    data.processingJobs.reduce((sum, job) => sum + (job.status === "Received" ? job.sentMeters * job.ratePerMeter : 0), 0) +
+    data.embroideryJobs.reduce((sum, job) => sum + (job.status === "Received" ? job.sentSuits * job.ratePerSuit : 0), 0);
+  const vendorPayments = data.ledgerEntries
+    .filter((entry) => entry.partyType === "Vendor")
+    .reduce((sum, entry) => sum + entry.credit, 0);
+  if (vendorLedgerPayable !== vendorCosts - vendorPayments) {
+    console.warn("Vendor payable consistency warning", { vendorLedgerPayable, expected: vendorCosts - vendorPayments });
+  }
+
+  for (const article of data.finishedArticles) {
+    const expected = calculateExpectedArticleStock(data, article);
+    if (article.aCategorySuits !== expected.aCategorySuits || article.bCategorySuits !== expected.bCategorySuits) {
+      console.warn("Article stock consistency warning", {
+        article: article.articleNumber,
+        actualA: article.aCategorySuits,
+        expectedA: expected.aCategorySuits,
+        actualB: article.bCategorySuits,
+        expectedB: expected.bCategorySuits,
+      });
+    }
+  }
+}
+
 function classNames(...values: Array<string | false | undefined>) {
   return values.filter(Boolean).join(" ");
 }
@@ -527,16 +821,17 @@ function AliPashaApp() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const activeSection = sectionBySlug[searchParams.get("section") ?? ""] ?? "Dashboard";
-  const [suppliers, setSuppliers] = useState<Supplier[]>(seedSuppliers);
-  const [vendors, setVendors] = useState<Vendor[]>(seedVendors);
-  const [customers, setCustomers] = useState<Customer[]>(seedCustomers);
-  const [rawLots, setRawLots] = useState<RawLot[]>(seedRawLots);
-  const [processingJobs, setProcessingJobs] = useState<ProcessingJob[]>(seedProcessingJobs);
-  const [cuttingJobs, setCuttingJobs] = useState<CuttingJob[]>(seedCuttingJobs);
-  const [embroideryJobs, setEmbroideryJobs] = useState<EmbroideryJob[]>(seedEmbroideryJobs);
-  const [finishedArticles, setFinishedArticles] = useState<FinishedArticle[]>(seedFinishedArticles);
-  const [sales, setSales] = useState<Sale[]>(seedSales);
-  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>(seedLedgerEntries);
+  const [suppliers, setSuppliers] = useState<Supplier[]>(seedAppData.suppliers);
+  const [vendors, setVendors] = useState<Vendor[]>(seedAppData.vendors);
+  const [customers, setCustomers] = useState<Customer[]>(seedAppData.customers);
+  const [rawLots, setRawLots] = useState<RawLot[]>(seedAppData.rawLots);
+  const [processingJobs, setProcessingJobs] = useState<ProcessingJob[]>(seedAppData.processingJobs);
+  const [cuttingJobs, setCuttingJobs] = useState<CuttingJob[]>(seedAppData.cuttingJobs);
+  const [embroideryJobs, setEmbroideryJobs] = useState<EmbroideryJob[]>(seedAppData.embroideryJobs);
+  const [finishedArticles, setFinishedArticles] = useState<FinishedArticle[]>(seedAppData.finishedArticles);
+  const [sales, setSales] = useState<Sale[]>(seedAppData.sales);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>(seedAppData.ledgerEntries);
+  const [hasLoadedAppState, setHasLoadedAppState] = useState(false);
 
   const [purchaseForm, setPurchaseForm] = useState<PurchaseForm>({
     supplierName: "",
@@ -590,6 +885,7 @@ function AliPashaApp() {
     paymentType: "Partial",
     notes: "",
   });
+  const [hasManualSaleRateEdit, setHasManualSaleRateEdit] = useState(false);
   const [customerPaymentForm, setCustomerPaymentForm] = useState<PaymentForm>({
     partyId: "cus-1",
     amount: "",
@@ -607,141 +903,67 @@ function AliPashaApp() {
     router.push(`${pathname}?${params.toString()}`, { scroll: false });
   }
 
-  const totals = useMemo(() => {
-    const rawInShop = rawLots.reduce((sum, lot) => sum + lot.rawAvailableMeters, 0);
-    const withProcessing = processingJobs
-      .filter((job) => job.status === "Sent")
-      .reduce((sum, job) => sum + job.sentMeters, 0);
-    const processedReady = rawLots.reduce((sum, lot) => sum + lot.processedMeters, 0);
-    const withEmbroidery = embroideryJobs
-      .filter((job) => job.status === "Sent")
-      .reduce((sum, job) => sum + job.sentSuits, 0);
-    const readyAStock = finishedArticles.reduce((sum, article) => sum + article.aCategorySuits, 0);
-    const readyBStock = finishedArticles.reduce((sum, article) => sum + article.bCategorySuits, 0);
-    const readyStock = readyAStock + readyBStock;
-    const totalSales = sales.reduce((sum, sale) => sum + sale.total, 0);
-    const totalReceived = sales.reduce((sum, sale) => sum + sale.paid, 0);
-    const customerCredit = ledgerEntries
-      .filter((entry) => entry.partyType === "Customer")
-      .reduce((sum, entry) => sum + entry.debit - entry.credit, 0);
-    const supplierPayable = ledgerEntries
-      .filter((entry) => entry.partyType === "Supplier")
-      .reduce((sum, entry) => sum + entry.debit - entry.credit, 0);
-    const vendorPayable = ledgerEntries
-      .filter((entry) => entry.partyType === "Vendor")
-      .reduce((sum, entry) => sum + entry.debit - entry.credit, 0);
-    const processingCost = processingJobs.reduce(
-      (sum, job) => sum + (job.status === "Received" ? job.sentMeters * job.ratePerMeter : 0),
-      0,
-    );
-    const embroideryCost = embroideryJobs.reduce(
-      (sum, job) => sum + (job.status === "Received" ? job.sentSuits * job.ratePerSuit : 0),
-      0,
-    );
-    const purchases = rawLots.reduce((sum, lot) => sum + lot.purchasedMeters * lot.ratePerMeter, 0);
-    const rawMetersPurchased = rawLots.reduce((sum, lot) => sum + lot.purchasedMeters, 0);
-    const aCategoryStockValue = finishedArticles.reduce(
-      (sum, article) => sum + article.aCategorySuits * article.costPerSuit,
-      0,
-    );
-    const bCategoryStockValue = finishedArticles.reduce(
-      (sum, article) => sum + article.bCategorySuits * article.costPerSuit,
-      0,
-    );
-    const readyStockValue = aCategoryStockValue + bCategoryStockValue;
-    const estimatedProfit = sales.reduce((sum, sale) => {
-      const article = finishedArticles.find((item) => item.id === sale.articleId);
-      return sum + sale.quantity * (sale.rate - (article?.costPerSuit ?? 0));
-    }, 0);
-    const estimatedAProfit = sales.reduce((sum, sale) => {
-      const article = finishedArticles.find((item) => item.id === sale.articleId);
-      return sale.category === "A Category" ? sum + sale.quantity * (sale.rate - (article?.costPerSuit ?? 0)) : sum;
-    }, 0);
-    const estimatedBProfit = sales.reduce((sum, sale) => {
-      const article = finishedArticles.find((item) => item.id === sale.articleId);
-      return sale.category === "B Category" ? sum + sale.quantity * (sale.rate - (article?.costPerSuit ?? 0)) : sum;
-    }, 0);
-    const processingLoss = processingJobs.reduce((sum, job) => sum + job.lossMeters, 0);
-    const bCategoryQuantity = finishedArticles.reduce((sum, article) => sum + article.bCategorySuits, 0);
-    const embroideryBCategory = embroideryJobs.reduce((sum, job) => sum + job.bCategorySuits, 0);
-    const embroideryMissing = embroideryJobs.reduce((sum, job) => sum + job.missingSuits, 0);
+  const appData = useMemo<AppData>(
+    () => ({
+      suppliers,
+      vendors,
+      customers,
+      rawLots,
+      processingJobs,
+      cuttingJobs,
+      embroideryJobs,
+      finishedArticles,
+      sales,
+      ledgerEntries,
+    }),
+    [suppliers, vendors, customers, rawLots, processingJobs, cuttingJobs, embroideryJobs, finishedArticles, sales, ledgerEntries],
+  );
 
-    return {
-      rawInShop,
-      withProcessing,
-      processedReady,
-      withEmbroidery,
-      readyAStock,
-      readyBStock,
-      readyStock,
-      totalSales,
-      totalReceived,
-      customerCredit,
-      supplierPayable,
-      vendorPayable,
-      supplierVendorPayable: supplierPayable + vendorPayable,
-      processingCost,
-      embroideryCost,
-      purchases,
-      rawMetersPurchased,
-      aCategoryStockValue,
-      bCategoryStockValue,
-      readyStockValue,
-      estimatedProfit,
-      estimatedAProfit,
-      estimatedBProfit,
-      processingLoss,
-      bCategoryQuantity,
-      embroideryBCategory,
-      embroideryMissing,
-    };
-  }, [rawLots, processingJobs, embroideryJobs, finishedArticles, sales, ledgerEntries]);
+  useEffect(() => {
+    const savedData = parseSavedAppData(window.localStorage.getItem(appStorageKey));
+    queueMicrotask(() => {
+      if (savedData) {
+        setSuppliers(savedData.suppliers);
+        setVendors(savedData.vendors);
+        setCustomers(savedData.customers);
+        setRawLots(savedData.rawLots);
+        setProcessingJobs(savedData.processingJobs);
+        setCuttingJobs(savedData.cuttingJobs);
+        setEmbroideryJobs(savedData.embroideryJobs);
+        setFinishedArticles(savedData.finishedArticles);
+        setSales(savedData.sales);
+        setLedgerEntries(savedData.ledgerEntries);
+      }
+      setHasLoadedAppState(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedAppState) return;
+    try {
+      window.localStorage.setItem(appStorageKey, JSON.stringify(appData));
+    } catch (error) {
+      console.warn("Ali Pasha data save failed.", error);
+      alert("Data could not be saved. Please do not close or refresh the browser until this is fixed.");
+    }
+  }, [appData, hasLoadedAppState]);
+
+  useEffect(() => {
+    if (!hasLoadedAppState || process.env.NODE_ENV === "production") return;
+    runConsistencyChecks(appData);
+  }, [appData, hasLoadedAppState]);
+
+  const totals = useMemo(() => calculateAppTotals(appData), [appData]);
 
   const customerSummaries = useMemo(
-    () =>
-      customers.map((customer) => {
-        const customerSales = sales.filter((sale) => sale.customerId === customer.id);
-        const entries = ledgerEntries.filter((entry) => entry.partyId === customer.id);
-        return {
-          customer,
-          totalSales: customerSales.reduce((sum, sale) => sum + sale.total, 0),
-          totalPaid: entries.reduce((sum, entry) => sum + entry.credit, 0),
-          balance: balanceFor(ledgerEntries, customer.id),
-          lastSaleDate: customerSales.at(-1)?.date ?? "-",
-        };
-      }),
+    () => getCustomerSummaries(customers, sales, ledgerEntries),
     [customers, sales, ledgerEntries],
   );
 
-  const payableSummaries = useMemo(() => {
-    const supplierRows = suppliers.map((supplier) => {
-      const entries = ledgerEntries.filter((entry) => entry.partyId === supplier.id);
-      return {
-        id: supplier.id,
-        name: supplier.name,
-        type: "Supplier" as const,
-        payable: entries.reduce((sum, entry) => sum + entry.debit, 0),
-        paid: entries.reduce((sum, entry) => sum + entry.credit, 0),
-        balance: balanceFor(ledgerEntries, supplier.id),
-        lastActivity: entries.at(-1)?.date ?? "-",
-        notes: supplier.notes ?? "",
-      };
-    });
-    const vendorRows = vendors.map((vendor) => {
-      const entries = ledgerEntries.filter((entry) => entry.partyId === vendor.id);
-      return {
-        id: vendor.id,
-        name: vendor.name,
-        type: "Vendor" as const,
-        payable: entries.reduce((sum, entry) => sum + entry.debit, 0),
-        paid: entries.reduce((sum, entry) => sum + entry.credit, 0),
-        balance: balanceFor(ledgerEntries, vendor.id),
-        lastActivity: entries.at(-1)?.date ?? "-",
-        notes: vendor.notes ?? vendor.service,
-      };
-    });
-    return [...supplierRows, ...vendorRows];
-  }, [suppliers, vendors, ledgerEntries]);
+  const payableSummaries = useMemo(
+    () => getPayableSummaries(suppliers, vendors, ledgerEntries),
+    [suppliers, vendors, ledgerEntries],
+  );
 
   function supplierName(id: string) {
     return suppliers.find((supplier) => supplier.id === id)?.name ?? "Unknown Supplier";
@@ -785,6 +1007,29 @@ function AliPashaApp() {
     const next = { id: makeId("cus"), name };
     setCustomers((current) => [...current, next]);
     return next;
+  }
+
+  function defaultSaleRate(articleId: string, category: Sale["category"]) {
+    const article = finishedArticles.find((item) => item.id === articleId);
+    if (!article) return saleForm.rate;
+    return String(category === "A Category" ? article.aCategorySalePrice : article.bCategorySalePrice);
+  }
+
+  function handleSaleArticleChange(articleId: string) {
+    setSaleForm((current) => ({
+      ...current,
+      articleId,
+      rate: defaultSaleRate(articleId, current.category),
+    }));
+    setHasManualSaleRateEdit(false);
+  }
+
+  function handleSaleCategoryChange(category: Sale["category"]) {
+    setSaleForm((current) => ({
+      ...current,
+      category,
+      rate: hasManualSaleRateEdit ? current.rate : defaultSaleRate(current.articleId, category),
+    }));
   }
 
   function handlePurchaseSubmit(event: FormEvent<HTMLFormElement>) {
@@ -911,7 +1156,7 @@ function AliPashaApp() {
 
   function handleProcessingReceive(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const job = processingJobs.find((item) => item.id === processingReceiveForm.jobId);
+    const job = processingJobs.find((item) => item.id === processingReceiveForm.jobId && item.status === "Sent");
     const received = toNumber(processingReceiveForm.receivedMeters);
 
     if (!job || received < 0) {
@@ -1045,6 +1290,10 @@ function AliPashaApp() {
       alert("Please enter valid embroidery send details.");
       return;
     }
+    if (!isWholeNumber(sent)) {
+      alert("Suits must be whole numbers.");
+      return;
+    }
     if (sent > article.aCategorySuits) {
       alert("Cannot send more suits than available stock.");
       return;
@@ -1086,11 +1335,15 @@ function AliPashaApp() {
 
   function handleEmbroideryReceive(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const job = embroideryJobs.find((item) => item.id === embroideryReceiveForm.jobId);
+    const job = embroideryJobs.find((item) => item.id === embroideryReceiveForm.jobId && item.status === "Sent");
     const received = toNumber(embroideryReceiveForm.receivedSuits);
 
     if (!job || received < 0) {
       alert("Please select a sent embroidery job and enter received suits.");
+      return;
+    }
+    if (!isWholeNumber(received)) {
+      alert("Suits must be whole numbers.");
       return;
     }
     if (received > job.sentSuits) {
@@ -1156,7 +1409,11 @@ function AliPashaApp() {
       alert("Please enter valid sale details.");
       return;
     }
-    const categoryStock = saleForm.category === "A Category" ? article.aCategorySuits : article.bCategorySuits;
+    if (!isWholeNumber(quantity)) {
+      alert("Suits must be whole numbers.");
+      return;
+    }
+    const categoryStock = getArticleStock(finishedArticles, article.id, saleForm.category);
     if (quantity > categoryStock) {
       alert(`Cannot sell more suits than available ${saleForm.category} stock.`);
       return;
@@ -1217,6 +1474,7 @@ function AliPashaApp() {
       paymentType: "Partial",
       notes: "",
     });
+    setHasManualSaleRateEdit(false);
   }
 
   function handleCustomerPayment(event: FormEvent<HTMLFormElement>) {
@@ -1279,6 +1537,10 @@ function AliPashaApp() {
 
   function updateArticlePrice(articleId: string, field: "costPerSuit" | "aCategorySalePrice" | "bCategorySalePrice", value: string) {
     const amount = toNumber(value);
+    if (amount < 0) {
+      alert("Price or cost cannot be negative.");
+      return;
+    }
     setFinishedArticles((current) =>
       current.map((article) => (article.id === articleId ? { ...article, [field]: amount } : article)),
     );
@@ -1480,6 +1742,13 @@ function AliPashaApp() {
           </Panel>
         );
       case "Dyeing & Printing":
+        {
+          const pendingProcessingJobs = processingJobs.filter((job) => job.status === "Sent");
+          const selectedProcessingReceiveJob = pendingProcessingJobs.find((job) => job.id === processingReceiveForm.jobId);
+          const receiveLoss = selectedProcessingReceiveJob
+            ? selectedProcessingReceiveJob.sentMeters - toNumber(processingReceiveForm.receivedMeters)
+            : 0;
+
         return (
           <>
             <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -1506,9 +1775,9 @@ function AliPashaApp() {
               <div className="min-w-0">
                 <Panel title="Receive Stock">
                   <form onSubmit={handleProcessingReceive} className="grid gap-2 pb-2">
-                    <SelectInput label="Pending processing job" value={processingReceiveForm.jobId} onChange={(value) => setProcessingReceiveForm({ ...processingReceiveForm, jobId: value })} options={processingJobs.filter((job) => job.status === "Sent").map((job) => ({ value: job.id, label: `${job.jobNumber} - ${lotNumber(job.lotId)} - ${formatMeters(job.sentMeters)}` }))} />
+                    <SelectInput label="Pending processing job" value={processingReceiveForm.jobId} onChange={(value) => setProcessingReceiveForm({ jobId: value, receivedMeters: "" })} options={pendingProcessingJobs.map((job) => ({ value: job.id, label: `${job.jobNumber} - ${lotNumber(job.lotId)} - ${formatMeters(job.sentMeters)}` }))} />
                     <NumberInput label="Received meters" value={processingReceiveForm.receivedMeters} onChange={(value) => setProcessingReceiveForm({ ...processingReceiveForm, receivedMeters: value })} />
-                    <CalcLine label="Loss" value={processingReceiveForm.jobId ? formatMeters((processingJobs.find((job) => job.id === processingReceiveForm.jobId)?.sentMeters ?? 0) - toNumber(processingReceiveForm.receivedMeters)) : formatMeters(0)} />
+                    <CalcLine label="Loss" value={formatMeters(receiveLoss)} />
                     <div className="pt-0.5">
                       <PrimaryButton>Receive Stock</PrimaryButton>
                     </div>
@@ -1537,6 +1806,7 @@ function AliPashaApp() {
             </Panel>
           </>
         );
+        }
       case "Cutting":
         return (
           <div className="grid items-start gap-5 xl:grid-cols-[390px_minmax(0,1fr)]">
@@ -1589,8 +1859,8 @@ function AliPashaApp() {
       case "Embroidery":
         {
           const selectedArticle = finishedArticles.find((article) => article.id === embroiderySendForm.articleId);
-          const selectedReceiveJob = embroideryJobs.find((job) => job.id === embroideryReceiveForm.jobId);
           const pendingEmbroideryJobs = embroideryJobs.filter((job) => job.status === "Sent");
+          const selectedReceiveJob = pendingEmbroideryJobs.find((job) => job.id === embroideryReceiveForm.jobId);
           const embroideryAReceived = embroideryJobs.reduce((sum, job) => sum + job.receivedASuits, 0);
           const embroideryVendorPayable = embroideryJobs.reduce(
             (sum, job) => sum + (job.status === "Received" ? job.sentSuits * job.ratePerSuit : 0),
@@ -1629,7 +1899,7 @@ function AliPashaApp() {
 
                 <Panel title="Receive Embroidery">
                   <form onSubmit={handleEmbroideryReceive} className="grid gap-3">
-                    <SelectInput label="Pending embroidery job" value={embroideryReceiveForm.jobId} onChange={(value) => setEmbroideryReceiveForm({ ...embroideryReceiveForm, jobId: value })} options={pendingEmbroideryJobs.map((job) => ({ value: job.id, label: `${job.jobNumber} - ${articleNumber(job.articleId)} - ${formatSuits(job.sentSuits)}` }))} />
+                    <SelectInput label="Pending embroidery job" value={embroideryReceiveForm.jobId} onChange={(value) => setEmbroideryReceiveForm({ jobId: value, receivedSuits: "" })} options={pendingEmbroideryJobs.map((job) => ({ value: job.id, label: `${job.jobNumber} - ${articleNumber(job.articleId)} - ${formatSuits(job.sentSuits)}` }))} />
                     <div className="grid gap-2 sm:grid-cols-2">
                       <CalcLine label="Sent suits" value={formatSuits(selectedReceiveJob?.sentSuits ?? 0)} />
                       <CalcLine label="Vendor" value={selectedReceiveJob ? vendorName(selectedReceiveJob.vendorId) : "-"} />
@@ -1781,31 +2051,15 @@ function AliPashaApp() {
               <Panel title="Create Sale">
                 <form onSubmit={handleSale} className="grid gap-3">
                   <TextInput label="Customer name" value={saleForm.customerName} onChange={(value) => setSaleForm({ ...saleForm, customerName: value })} placeholder="Ali Fabrics" />
-                  <SelectInput label="Select article" value={saleForm.articleId} onChange={(value) => {
-                    const article = finishedArticles.find((item) => item.id === value);
-                    setSaleForm({
-                      ...saleForm,
-                      articleId: value,
-                      rate: String(
-                        saleForm.category === "A Category"
-                          ? article?.aCategorySalePrice ?? saleForm.rate
-                          : article?.bCategorySalePrice ?? saleForm.rate,
-                      ),
-                    });
-                  }} options={finishedArticles.filter((article) => article.aCategorySuits + article.bCategorySuits > 0).map((article) => ({ value: article.id, label: `${article.articleNumber} - A ${formatSuits(article.aCategorySuits)}, B ${formatSuits(article.bCategorySuits)}` }))} />
-                  <SelectInput label="Category" value={saleForm.category} onChange={(value) => {
-                    const category = value as Sale["category"];
-                    const article = finishedArticles.find((item) => item.id === saleForm.articleId);
-                    setSaleForm({
-                      ...saleForm,
-                      category,
-                      rate: String(category === "A Category" ? article?.aCategorySalePrice ?? saleForm.rate : article?.bCategorySalePrice ?? saleForm.rate),
-                    });
-                  }} options={["A Category", "B Category"].map((value) => ({ value, label: value }))} />
+                  <SelectInput label="Select article" value={saleForm.articleId} onChange={handleSaleArticleChange} options={finishedArticles.filter((article) => article.aCategorySuits + article.bCategorySuits > 0).map((article) => ({ value: article.id, label: `${article.articleNumber} - A ${formatSuits(article.aCategorySuits)}, B ${formatSuits(article.bCategorySuits)}` }))} />
+                  <SelectInput label="Category" value={saleForm.category} onChange={(value) => handleSaleCategoryChange(value as Sale["category"])} options={["A Category", "B Category"].map((value) => ({ value, label: value }))} />
                   <CalcLine label={saleForm.category === "A Category" ? "Available A stock" : "Available B stock"} value={formatSuits(selectedCategoryStock)} />
                   <div className="grid grid-cols-2 gap-2">
                     <NumberInput label="Quantity (suits)" value={saleForm.quantity} onChange={(value) => setSaleForm({ ...saleForm, quantity: value })} />
-                    <NumberInput label="Rate (PKR)" value={saleForm.rate} onChange={(value) => setSaleForm({ ...saleForm, rate: value })} />
+                    <NumberInput label="Rate (PKR)" value={saleForm.rate} onChange={(value) => {
+                      setHasManualSaleRateEdit(true);
+                      setSaleForm({ ...saleForm, rate: value });
+                    }} />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <NumberInput label="Paid amount (PKR)" value={saleForm.paidAmount} onChange={(value) => setSaleForm({ ...saleForm, paidAmount: value })} />
@@ -1966,13 +2220,15 @@ function AliPashaApp() {
           ["Ready A stock", formatSuits(totals.readyAStock), "Suits"],
           ["Ready B stock", formatSuits(totals.readyBStock), "Suits"],
         ];
-        const monthlySummary = sales.reduce<Record<string, { sales: number; received: number; balance: number }>>((summary, sale) => {
-          const month = sale.date.slice(0, 7);
+        const monthlySummary = ledgerEntries
+          .filter((entry) => entry.partyType === "Customer")
+          .reduce<Record<string, { sales: number; received: number; balance: number }>>((summary, entry) => {
+          const month = entry.date.slice(0, 7);
           const current = summary[month] ?? { sales: 0, received: 0, balance: 0 };
           summary[month] = {
-            sales: current.sales + sale.total,
-            received: current.received + sale.paid,
-            balance: current.balance + sale.balance,
+            sales: current.sales + entry.debit,
+            received: current.received + entry.credit,
+            balance: current.balance + entry.debit - entry.credit,
           };
           return summary;
         }, {});
